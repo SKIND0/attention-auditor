@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Attention Auditor",
+  "version": "1.0",
+  "description": "Tracks browsing habits and provides AI-powered feedback",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "48": "icon48.png"
+    }
+  },
+  "icons": {
+    "48": "icon48.png",
+    "128": "icon48.png"
+  }
+}

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {
+      width: 350px;
+      padding: 20px;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background-color: #1a1a2e;
+      color: #e0e0e0;
+      margin: 0;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 15px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid #16213e;
+    }
+    .header img {
+      width: 28px;
+      height: 28px;
+    }
+    h1 {
+      font-size: 18px;
+      margin: 0;
+      color: #7f5af0;
+    }
+    .subtitle {
+      font-size: 11px;
+      color: #666;
+      margin-top: 2px;
+    }
+    .site {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      margin-bottom: 6px;
+      background-color: #16213e;
+      border-radius: 8px;
+      transition: background-color 0.2s;
+    }
+    .site:hover {
+      background-color: #1f2b47;
+    }
+    .rank {
+      color: #7f5af0;
+      font-weight: bold;
+      margin-right: 10px;
+      font-size: 14px;
+    }
+    .domain {
+      font-weight: 600;
+      font-size: 14px;
+      flex-grow: 1;
+    }
+    .time {
+      color: #2cb67d;
+      font-weight: bold;
+      font-size: 14px;
+    }
+    .empty {
+      color: #555;
+      font-style: italic;
+      text-align: center;
+      padding: 20px;
+    }
+    .footer {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid #16213e;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .total {
+      font-size: 12px;
+      color: #888;
+    }
+    .total span {
+      color: #2cb67d;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="icon48.png" alt="logo">
+    <div>
+      <h1>Attention Auditor</h1>
+      <div class="subtitle">watching you watch the internet</div>
+    </div>
+  </div>
+  <div id="sites"></div>
+  <div class="footer">
+    <div class="total">Total tracked: <span id="totalTime">0s</span></div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
