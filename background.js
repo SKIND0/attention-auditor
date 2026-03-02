@@ -1,3 +1,5 @@
+console.log("BACKGROUND SCRIPT LOADED");
+
 let currentSite = null;
 let startTime = null;
 
@@ -106,4 +108,54 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
       }
     });
   }
+});
+
+function sendToServer() {
+  chrome.storage.local.get(["siteData"], (result) => {
+    let siteData = result.siteData || {};
+    let sites = [];
+
+    for (let domain in siteData) {
+      if (siteData[domain] > 0) {
+        sites.push({ domain: domain, seconds: siteData[domain] });
+      }
+    }
+
+    if (sites.length === 0) return;
+
+    fetch("http://127.0.0.1:5000/api/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sites: sites })
+    })
+    .then(response => response.json())
+    .then(data => {
+      console.log("Sent to server:", data);
+      chrome.storage.local.set({ siteData: {} });
+    })
+    .catch(error => {
+      console.log("Server not available:", error);
+    });
+  });
+}
+
+chrome.alarms.create("sendData", { periodInMinutes: 1 });
+chrome.alarms.create("sendData", { periodInMinutes: 1 });
+sendToServer();
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "sendData") {
+    console.log("Alarm fired, sending data...");
+    sendToServer();
+  }
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+  console.log("Extension installed/refreshed, sending data...");
+  sendToServer();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  console.log("Browser started, sending data...");
+  sendToServer();
 });

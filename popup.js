@@ -8,30 +8,33 @@ function formatTime(seconds) {
   return hours + "h " + minutes + "m";
 }
 
-chrome.storage.local.get(["siteData"], (result) => {
-  let siteData = result.siteData || {};
-  let container = document.getElementById("sites");
+fetch("http://127.0.0.1:5000/api/stats")
+  .then(response => response.json())
+  .then(data => {
+    let container = document.getElementById("sites");
+    let sites = data.today;
 
-  let sites = Object.entries(siteData).sort((a, b) => b[1] - a[1]);
+    if (sites.length === 0) {
+      container.innerHTML = '<p class="empty">No data yet. Start browsing!</p>';
+      return;
+    }
 
-  if (sites.length === 0) {
-    container.innerHTML = '<p class="empty">No data yet. Start browsing!</p>';
-    return;
-  }
+    let totalSeconds = 0;
 
-  let totalSeconds = 0;
+    sites.forEach((site, index) => {
+      totalSeconds += site.total_seconds;
+      let div = document.createElement("div");
+      div.className = "site";
+      div.innerHTML = `
+        <span class="rank">#${index + 1}</span>
+        <span class="domain">${site.domain}</span>
+        <span class="time">${formatTime(site.total_seconds)}</span>
+      `;
+      container.appendChild(div);
+    });
 
-  sites.forEach(([domain, seconds], index) => {
-    totalSeconds += seconds;
-    let div = document.createElement("div");
-    div.className = "site";
-    div.innerHTML = `
-      <span class="rank">#${index + 1}</span>
-      <span class="domain">${domain}</span>
-      <span class="time">${formatTime(seconds)}</span>
-    `;
-    container.appendChild(div);
+    document.getElementById("totalTime").textContent = formatTime(totalSeconds);
+  })
+  .catch(error => {
+    document.getElementById("sites").innerHTML = '<p class="empty">Server not available</p>';
   });
-
-  document.getElementById("totalTime").textContent = formatTime(totalSeconds);
-});
