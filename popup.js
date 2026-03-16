@@ -8,33 +8,81 @@ function formatTime(seconds) {
   return hours + "h " + minutes + "m";
 }
 
-fetch("http://127.0.0.1:5000/api/stats")
-  .then(response => response.json())
-  .then(data => {
-    let container = document.getElementById("sites");
-    let sites = data.today;
+function getTodayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
-    if (sites.length === 0) {
-      container.innerHTML = '<p class="empty">No data yet. Start browsing!</p>';
-      return;
+function renderSites(sites) {
+  const container = document.getElementById("sites");
+  container.innerHTML = "";
+
+  if (!sites || sites.length === 0) {
+    container.innerHTML = '<p class="empty">No data yet. Start browsing!</p>';
+    document.getElementById("totalTime").textContent = "0s";
+    return;
+  }
+
+  // Sort descending
+  sites.sort((a, b) => b.total_seconds - a.total_seconds);
+
+  let totalSeconds = 0;
+  sites.forEach((site, index) => {
+    totalSeconds += site.total_seconds;
+    const div = document.createElement("div");
+    div.className = "site";
+    div.innerHTML = `
+      <span class="rank">#${index + 1}</span>
+      <span class="domain">${site.domain}</span>
+      <span class="time">${formatTime(site.total_seconds)}</span>
+    `;
+    container.appendChild(div);
+  });
+
+  document.getElementById("totalTime").textContent = formatTime(totalSeconds);
+}
+
+function showSource(isLocal) {
+  const el = document.getElementById("dataSource");
+  if (!el) return;
+  el.textContent = isLocal ? "● local cache" : "● live";
+  el.style.color = isLocal ? "#f4a261" : "#2cb67d";
+}
+
+function loadFromLocal() {
+  const todayKey = getTodayKey();
+  const storageKey = `siteData_${todayKey}`;
+
+  chrome.storage.local.get([storageKey, "pendingData"], (result) => {
+    const todayData = result[storageKey] || {};
+    const pending = result.pendingData || {};
+
+    // Merge both buckets so nothing looks missing
+    const merged = { ...pending };
+    for (const [domain, secs] of Object.entries(todayData)) {
+      merged[domain] = (merged[domain] || 0) + secs;
     }
 
-    let totalSeconds = 0;
+    const sites = Object.entries(merged).map(([domain, total_seconds]) => ({
+      domain,
+      total_seconds,
+    }));
 
-    sites.forEach((site, index) => {
-      totalSeconds += site.total_seconds;
-      let div = document.createElement("div");
-      div.className = "site";
-      div.innerHTML = `
-        <span class="rank">#${index + 1}</span>
-        <span class="domain">${site.domain}</span>
-        <span class="time">${formatTime(site.total_seconds)}</span>
-      `;
-      container.appendChild(div);
-    });
+    renderSites(sites);
+    showSource(true);
+  });
+}
 
-    document.getElementById("totalTime").textContent = formatTime(totalSeconds);
+// Try server first, fall back to local chrome.storage
+fetch("http://127.0.0.1:5000/api/stats")
+  .then((r) => {
+    if (!r.ok) throw new Error("Non-200");
+    return r.json();
   })
-  .catch(error => {
-    document.getElementById("sites").innerHTML = '<p class="empty">Server not available</p>';
+  .then((data) => {
+    renderSites(data.today);
+    showSource(false);
+  })
+  .catch(() => {
+    loadFromLocal();
   });
