@@ -1,3 +1,6 @@
+// Ask background to flush current in-progress session before we read storage
+chrome.runtime.sendMessage({ type: "flushSession" });
+
 function formatTime(seconds) {
   if (seconds < 60) return seconds + "s";
   let minutes = Math.floor(seconds / 60);

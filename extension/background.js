@@ -4,6 +4,13 @@ let currentSite = null;
 let startTime = null;
 let isIdle = false;
 
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.type === "flushSession") {
+    saveElapsed();
+    if (startTime) startTime = Date.now(); // reset so we don't double-count
+  }
+});
+
 // Subdomains that should be kept distinct instead of merged to root domain
 const KEEP_SUBDOMAIN = new Set([
   "mail.google.com",
@@ -146,7 +153,7 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
     focusDebounce = setTimeout(() => {
       focusDebounce = null;
       pauseTracking("window lost focus");
-    }, 3000); // 3-second grace period
+    }, 15000); // 15-second grace period
   } else {
     // Chrome regained focus — cancel any pending pause
     if (focusDebounce) {
