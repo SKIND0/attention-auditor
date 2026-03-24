@@ -1,4 +1,3 @@
-// Ask background to flush current in-progress session before we read storage
 chrome.runtime.sendMessage({ type: "flushSession" });
 
 function formatTime(seconds) {
@@ -26,7 +25,6 @@ function renderSites(sites) {
     return;
   }
 
-  // Sort descending
   sites.sort((a, b) => b.total_seconds - a.total_seconds);
 
   let totalSeconds = 0;
@@ -45,14 +43,8 @@ function renderSites(sites) {
   document.getElementById("totalTime").textContent = formatTime(totalSeconds);
 }
 
-function showSource(isLocal) {
-  const el = document.getElementById("dataSource");
-  if (!el) return;
-  el.textContent = isLocal ? "● local cache" : "● live";
-  el.style.color = isLocal ? "#f4a261" : "#2cb67d";
-}
-
-function loadFromLocal() {
+// Always load local data — it's always fresh
+setTimeout(() => {
   const todayKey = getTodayKey();
   const storageKey = `siteData_${todayKey}`;
 
@@ -60,32 +52,15 @@ function loadFromLocal() {
     const todayData = result[storageKey] || {};
     const pending = result.pendingData || {};
 
-    // Merge both buckets so nothing looks missing
     const merged = { ...pending };
     for (const [domain, secs] of Object.entries(todayData)) {
       merged[domain] = (merged[domain] || 0) + secs;
     }
 
-    const sites = Object.entries(merged).map(([domain, total_seconds]) => ({
-      domain,
-      total_seconds,
-    }));
+    const sites = Object.entries(merged)
+      .filter(([domain]) => domain !== "0.1" && domain !== "localhost")
+      .map(([domain, total_seconds]) => ({ domain, total_seconds }));
 
     renderSites(sites);
-    showSource(true);
   });
-}
-
-// Try server first, fall back to local chrome.storage
-fetch("http://127.0.0.1:5000/api/stats")
-  .then((r) => {
-    if (!r.ok) throw new Error("Non-200");
-    return r.json();
-  })
-  .then((data) => {
-    renderSites(data.today);
-    showSource(false);
-  })
-  .catch(() => {
-    loadFromLocal();
-  });
+}, 100);
