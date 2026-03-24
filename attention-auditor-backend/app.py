@@ -7,14 +7,24 @@ from datetime import date
 app = Flask(__name__)
 CORS(app)
 
-openai_client = OpenAI(api_key="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")
+import os
 
+openai_api_key = os.environ.get("OPENAI_API_KEY")
+if not openai_api_key:
+    openai_api_key = input("Enter your OpenAI API key: ")
+
+openai_client = OpenAI(api_key=openai_api_key)
+
+
+db_password = os.environ.get("DB_PASSWORD")
+if not db_password:
+    db_password = input("Enter your MySQL password: ")
 
 def get_db():
     return mysql.connector.connect(
         host="localhost",
         user="root",
-        password="thisissocool1267!",
+        password=db_password,
         database="attention_auditor"
     )
 
