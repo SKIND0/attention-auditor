@@ -46,6 +46,9 @@ function getDomain(url) {
     if (!hostname) return null;
 
     // Check alias map first (before any stripping)
+    if (hostname === "127.0.0.1" || hostname === "localhost") {
+      return "localhost:5000";
+    }
     if (domainAliases[hostname]) {
       return domainAliases[hostname];
     }
