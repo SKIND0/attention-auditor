@@ -254,7 +254,7 @@ function sendToServer() {
 
     if (sites.length === 0) return;
 
-    fetch("http://127.0.0.1:5000/api/track", {
+    fetch("https://attention-auditor-production.up.railway.app/api/track", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sites, date: todayKey }),
