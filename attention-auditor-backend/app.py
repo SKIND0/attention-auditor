@@ -9,26 +9,23 @@ CORS(app)
 
 import os
 
-openai_api_key = os.environ.get("OPENAI_API_KEY")
-if not openai_api_key:
-    openai_api_key = input("Enter your OpenAI API key: ")
+db_host = os.environ.get("MYSQLHOST") or os.environ.get("MYSQL_HOST", "localhost")
+db_port = int(os.environ.get("MYSQLPORT") or os.environ.get("MYSQL_PORT", 3306))
+db_user = os.environ.get("MYSQLUSER") or os.environ.get("MYSQL_USER", "root")
+db_password = os.environ.get("MYSQLPASSWORD") or os.environ.get("MYSQL_PASSWORD") or input("Enter MySQL password: ")
+db_name = os.environ.get("MYSQLDATABASE") or os.environ.get("MYSQL_DATABASE", "attention_auditor")
 
+openai_api_key = os.environ.get("OPENAI_API_KEY") or input("Enter OpenAI API key: ")
 openai_client = OpenAI(api_key=openai_api_key)
-
-
-db_password = os.environ.get("DB_PASSWORD")
-if not db_password:
-    db_password = input("Enter your MySQL password: ")
 
 def get_db():
     return mysql.connector.connect(
-        host="localhost",
-        user="root",
+        host=db_host,
+        port=db_port,
+        user=db_user,
         password=db_password,
-        database="attention_auditor"
+        database=db_name
     )
-
-
 def categorize_domain(domain):
     """Check database first, then ask AI if unknown."""
     conn = get_db()
