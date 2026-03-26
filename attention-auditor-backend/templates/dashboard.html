@@ -392,35 +392,37 @@
             .then(r => r.json())
             .then(weekly => {
                 if (weekly.daily_totals.length > 0) {
-                    // Group days into weeks starting Sunday
-                    const weeks = {};
-                    weekly.daily_totals.forEach(d => {
-                        const date = new Date(d.visit_date + "T00:00:00");
-                        const day = date.getDay(); // 0=Sunday
-                        const sunday = new Date(date);
-                        sunday.setDate(date.getDate() - day);
-                        const weekKey = sunday.toISOString().split("T")[0];
+                    // Fill in all 7 days, even if no data
+                    const today = new Date();
+                    const days = [];
+                    const totals = [];
+                    const dataMap = {};
 
-                        if (!weeks[weekKey]) {
-                            weeks[weekKey] = { total: 0, days: [] };
-                        }
-                        weeks[weekKey].total += Number(d.total);
-                        weeks[weekKey].days.push(d);
+                    weekly.daily_totals.forEach(d => {
+                        dataMap[d.visit_date] = Number(d.total);
                     });
 
-                    const weekKeys = Object.keys(weeks).sort();
-                    const weekLabels = weekKeys.map(w => "Week of " + w);
-                    const weekTotals = weekKeys.map(w => weeks[w].total);
+                    for (let i = 6; i >= 0; i--) {
+                        const date = new Date(today);
+                        date.setDate(today.getDate() - i);
+                        const key = date.toISOString().split("T")[0];
+                        days.push(key);
+                        totals.push(dataMap[key] || 0);
+                    }
 
                     new Chart(document.getElementById("weeklyChart"), {
-                        type: "bar",
+                        type: "line",
                         data: {
-                            labels: weekLabels,
+                            labels: days,
                             datasets: [{
                                 label: "Total browsing time",
-                                data: weekTotals,
-                                backgroundColor: "#7f5af0",
-                                borderRadius: 6
+                                data: totals,
+                                borderColor: "#7f5af0",
+                                backgroundColor: "rgba(127, 90, 240, 0.1)",
+                                fill: true,
+                                tension: 0.3,
+                                pointBackgroundColor: "#2cb67d",
+                                pointRadius: 6
                             }]
                         },
                         options: {
