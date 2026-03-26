@@ -147,40 +147,40 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 // ─── Window focus ─────────────────────────────────────────────────────────────
 // Use a short debounce so rapidly alt-tabbing back doesn't wipe data
 
-let focusDebounce = null;
-
-chrome.windows.onFocusChanged.addListener((windowId) => {
-  if (windowId === chrome.windows.WINDOW_ID_NONE) {
-    // Chrome lost focus — wait briefly before pausing in case user alt-tabs back
-    if (focusDebounce) return; // already pending
-    focusDebounce = setTimeout(() => {
-      focusDebounce = null;
-      pauseTracking("window lost focus");
-    }, 15000); // 15-second grace period
-  } else {
-    // Chrome regained focus — cancel any pending pause
-    if (focusDebounce) {
-      clearTimeout(focusDebounce);
-      focusDebounce = null;
-    }
-
-    if (!isIdle) {
-      // Re-detect which site we're on
-      chrome.tabs.query({ active: true, windowId: windowId }, (tabs) => {
-        if (tabs[0] && tabs[0].url) {
-          const domain = getDomain(tabs[0].url);
-          if (domain) {
-            if (domain !== currentSite) {
-              // Switched sites while focus was away
-              currentSite = domain;
-            }
-            resumeTracking();
-          }
-        }
-      });
-    }
-  }
-});
+// let focusDebounce = null;
+//
+// chrome.windows.onFocusChanged.addListener((windowId) => {
+//   if (windowId === chrome.windows.WINDOW_ID_NONE) {
+//     // Chrome lost focus — wait briefly before pausing in case user alt-tabs back
+//     if (focusDebounce) return; // already pending
+//     focusDebounce = setTimeout(() => {
+//       focusDebounce = null;
+//       pauseTracking("window lost focus");
+//     }, 15000); // 15-second grace period
+//   } else {
+//     // Chrome regained focus — cancel any pending pause
+//     if (focusDebounce) {
+//       clearTimeout(focusDebounce);
+//       focusDebounce = null;
+//     }
+//
+//     if (!isIdle) {
+//       // Re-detect which site we're on
+//       chrome.tabs.query({ active: true, windowId: windowId }, (tabs) => {
+//         if (tabs[0] && tabs[0].url) {
+//           const domain = getDomain(tabs[0].url);
+//           if (domain) {
+//             if (domain !== currentSite) {
+//               // Switched sites while focus was away
+//               currentSite = domain;
+//             }
+//             resumeTracking();
+//           }
+//         }
+//       });
+//     }
+//   }
+// });
 
 // ─── Idle detection ───────────────────────────────────────────────────────────
 // Requires "idle" permission in manifest.json
