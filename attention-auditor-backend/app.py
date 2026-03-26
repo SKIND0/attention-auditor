@@ -150,7 +150,6 @@ def weekly_stats():
     cursor.execute(
         """SELECT visit_date, domain, total_seconds
            FROM daily_summary
-           WHERE visit_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
            ORDER BY visit_date DESC, total_seconds DESC"""
     )
     rows = cursor.fetchall()
@@ -168,7 +167,6 @@ def weekly_stats():
     cursor.execute(
         """SELECT visit_date, SUM(total_seconds) as total
            FROM daily_summary
-           WHERE visit_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
            GROUP BY visit_date
            ORDER BY visit_date ASC"""
     )

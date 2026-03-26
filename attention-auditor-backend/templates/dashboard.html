@@ -222,7 +222,7 @@
         </div>
 
         <div class="card full-width">
-            <h2>Daily Total — Last 7 Days</h2>
+            <h2>Weekly Totals</h2>
             <div class="chart-container">
                 <canvas id="weeklyChart"></canvas>
             </div>
@@ -392,22 +392,35 @@
             .then(r => r.json())
             .then(weekly => {
                 if (weekly.daily_totals.length > 0) {
-                    const days = weekly.daily_totals.map(d => d.visit_date);
-                    const totals = weekly.daily_totals.map(d => Number(d.total));
+                    // Group days into weeks starting Sunday
+                    const weeks = {};
+                    weekly.daily_totals.forEach(d => {
+                        const date = new Date(d.visit_date + "T00:00:00");
+                        const day = date.getDay(); // 0=Sunday
+                        const sunday = new Date(date);
+                        sunday.setDate(date.getDate() - day);
+                        const weekKey = sunday.toISOString().split("T")[0];
+
+                        if (!weeks[weekKey]) {
+                            weeks[weekKey] = { total: 0, days: [] };
+                        }
+                        weeks[weekKey].total += Number(d.total);
+                        weeks[weekKey].days.push(d);
+                    });
+
+                    const weekKeys = Object.keys(weeks).sort();
+                    const weekLabels = weekKeys.map(w => "Week of " + w);
+                    const weekTotals = weekKeys.map(w => weeks[w].total);
 
                     new Chart(document.getElementById("weeklyChart"), {
-                        type: "line",
+                        type: "bar",
                         data: {
-                            labels: days,
+                            labels: weekLabels,
                             datasets: [{
                                 label: "Total browsing time",
-                                data: totals,
-                                borderColor: "#7f5af0",
-                                backgroundColor: "rgba(127, 90, 240, 0.1)",
-                                fill: true,
-                                tension: 0.3,
-                                pointBackgroundColor: "#2cb67d",
-                                pointRadius: 6
+                                data: weekTotals,
+                                backgroundColor: "#7f5af0",
+                                borderRadius: 6
                             }]
                         },
                         options: {
