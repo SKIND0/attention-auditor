@@ -113,13 +113,15 @@ def stats():
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
 
+    today_str = request.args.get("date", str(date.today()))
+
     cursor.execute(
         """SELECT d.domain, d.total_seconds, COALESCE(c.category, 'neutral') as category
            FROM daily_summary d
            LEFT JOIN site_categories c ON d.domain = c.domain
            WHERE d.visit_date = %s
            ORDER BY d.total_seconds DESC""",
-        (date.today(),)
+        (today_str,)
     )
     today = cursor.fetchall()
 
@@ -135,7 +137,6 @@ def stats():
     cursor.close()
     conn.close()
     return jsonify({"today": today, "all_time": all_time}), 200
-
 
 @app.route("/")
 def dashboard():

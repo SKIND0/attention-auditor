@@ -272,7 +272,8 @@
                 });
         }
 
-        fetch("/api/stats")
+       const todayDate = new Date().toISOString().split("T")[0];
+        fetch("/api/stats?date=" + todayDate)
             .then(r => r.json())
             .then(data => {
                 const today = filterJunk(data.today);

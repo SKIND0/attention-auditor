@@ -180,6 +180,14 @@ This project was built in part to demonstrate how much data browser extensions c
 
 ---
 
+## Known Limitations
+
+- The extension tracks the **active tab** only — if a site is open but you're interacting with a different tab, that time is not captured. This means passive viewing (like a Zoom call on a second monitor) won't be fully tracked.
+- Only one browser should run the extension at a time. Multiple browsers send data to the same database without user separation, which inflates the totals.
+- The idle detector pauses tracking after 60 seconds of no mouse or keyboard input. Short idle periods under 60 seconds are still counted.
+
+---
+
 ## Built By
 
 Sarah Kind
