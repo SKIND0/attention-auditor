@@ -1,465 +1,725 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Attention Auditor</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=Share+Tech+Mono&family=Playfair+Display:wght@700;900&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', Arial, sans-serif;
-            background-color: #0f0f1a;
-            color: #e0e0e0;
-            padding: 30px;
+        :root {
+            --green: #00ff9d;
+            --red: #ff2d55;
+            --amber: #ffb800;
+            --purple: #b87fff;
+            --bg: #060810;
+            --glass-bg: rgba(255,255,255,0.035);
+            --glass-border: rgba(255,255,255,0.08);
+            --text: #e8e8e8;
+            --muted: #5a6070;
         }
-        .header {
-            text-align: center;
-            margin-bottom: 40px;
-        }
-        .header h1 {
-            font-size: 32px;
-            color: #7f5af0;
-        }
-        .header p {
-            color: #666;
-            margin-top: 5px;
-        }
-        .grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        .card {
-            background-color: #1a1a2e;
-            border-radius: 12px;
-            padding: 24px;
-        }
-        .card h2 {
-            font-size: 18px;
-            color: #7f5af0;
-            margin-bottom: 16px;
-        }
-        .card.full-width {
-            grid-column: 1 / -1;
-        }
-        .site-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 12px;
-            margin-bottom: 6px;
-            border-radius: 8px;
-        }
-        .site-row:hover {
-            filter: brightness(1.2);
-        }
-        .site-row.productive {
-            background-color: rgba(44, 182, 125, 0.15);
-            border-left: 3px solid #2cb67d;
-        }
-        .site-row.distracting {
-            background-color: rgba(229, 49, 112, 0.15);
-            border-left: 3px solid #e53170;
-        }
-        .site-row.neutral {
-            background-color: rgba(244, 162, 97, 0.15);
-            border-left: 3px solid #f4a261;
-        }
-        .site-rank {
-            color: #7f5af0;
-            font-weight: bold;
-            margin-right: 12px;
-        }
-        .site-domain {
-            flex-grow: 1;
-            font-weight: 600;
-        }
-        .site-category {
-            font-size: 11px;
-            padding: 2px 8px;
-            border-radius: 10px;
-            margin-right: 12px;
-        }
-        .site-category.productive { background-color: #2cb67d; color: #fff; }
-        .site-category.distracting { background-color: #e53170; color: #fff; }
-        .site-category.neutral { background-color: #f4a261; color: #fff; }
-        .site-time {
-            color: #2cb67d;
-            font-weight: bold;
-        }
-        .chart-container {
-            position: relative;
-            height: 300px;
-        }
-        .stat-number {
-            font-size: 36px;
-            font-weight: bold;
-            color: #2cb67d;
-        }
-        .stat-number.productive { color: #2cb67d; }
-        .stat-number.distracting { color: #e53170; }
-        .stat-number.neutral { color: #f4a261; }
-        .stat-label {
-            color: #888;
-            font-size: 14px;
-            margin-top: 4px;
-        }
-        .stats-row {
-            display: flex;
-            gap: 40px;
-            margin-bottom: 20px;
-        }
-        .loading {
-            color: #555;
-            text-align: center;
-            padding: 20px;
-        }
-        .feedback-section {
-            margin-top: 16px;
-        }
-        .feedback-buttons {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 16px;
-        }
-        .feedback-btn {
-            padding: 8px 20px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 13px;
-            transition: transform 0.1s;
-        }
-        .feedback-btn:hover {
-            transform: scale(1.05);
-        }
-        .feedback-btn:active {
-            transform: scale(0.95);
-        }
-        .feedback-btn.coach {
-            background-color: #2cb67d;
-            color: #fff;
-        }
-        .feedback-btn.advisor {
-            background-color: #e53170;
-            color: #fff;
-        }
-        .feedback-btn.mentor {
-            background-color: #7f5af0;
-            color: #fff;
-        }
-        .feedback-text {
-            background-color: #16213e;
-            border-radius: 8px;
-            padding: 16px;
-            line-height: 1.6;
-            min-height: 60px;
-        }
-        .feedback-loading {
-            color: #555;
-            font-style: italic;
-        }
-    </style>
+
+```
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+        font-family: 'IBM Plex Mono', monospace;
+        background-color: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+        overflow-x: hidden;
+    }
+
+    /* Atmospheric background */
+    body::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background:
+            radial-gradient(ellipse 80% 60% at 20% 10%, rgba(0,100,60,0.12) 0%, transparent 60%),
+            radial-gradient(ellipse 60% 50% at 80% 80%, rgba(80,0,120,0.14) 0%, transparent 60%),
+            radial-gradient(ellipse 40% 40% at 50% 50%, rgba(0,40,80,0.1) 0%, transparent 70%);
+        pointer-events: none;
+        z-index: 0;
+    }
+
+    /* Subtle scanlines */
+    body::after {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background: repeating-linear-gradient(
+            0deg,
+            transparent,
+            transparent 3px,
+            rgba(0,0,0,0.08) 3px,
+            rgba(0,0,0,0.08) 4px
+        );
+        pointer-events: none;
+        z-index: 1;
+    }
+
+    .page {
+        position: relative;
+        z-index: 2;
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 40px 32px;
+    }
+
+    /* ── MASTHEAD ── */
+    .masthead {
+        border-top: 1px solid var(--glass-border);
+        border-bottom: 1px solid var(--glass-border);
+        padding: 24px 0 20px;
+        margin-bottom: 40px;
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+    }
+
+    .masthead-left {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .edition-label {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 10px;
+        letter-spacing: 0.25em;
+        color: var(--green);
+        text-transform: uppercase;
+        margin-bottom: 6px;
+    }
+
+    .masthead h1 {
+        font-family: 'Playfair Display', serif;
+        font-size: clamp(42px, 6vw, 80px);
+        font-weight: 900;
+        line-height: 0.9;
+        letter-spacing: -2px;
+        color: #fff;
+    }
+
+    .masthead h1 span {
+        color: var(--green);
+    }
+
+    .masthead-right {
+        text-align: right;
+    }
+
+    .masthead-date {
+        font-size: 11px;
+        color: var(--muted);
+        letter-spacing: 0.1em;
+    }
+
+    .masthead-tagline {
+        font-size: 11px;
+        color: var(--muted);
+        font-style: italic;
+        margin-top: 4px;
+    }
+
+    /* ── STAT STRIP ── */
+    .stat-strip {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 1px;
+        background: var(--glass-border);
+        border: 1px solid var(--glass-border);
+        border-radius: 4px;
+        margin-bottom: 32px;
+        overflow: hidden;
+    }
+
+    .stat-cell {
+        background: var(--glass-bg);
+        backdrop-filter: blur(12px);
+        padding: 20px 24px;
+        position: relative;
+    }
+
+    .stat-cell::before {
+        content: attr(data-label);
+        display: block;
+        font-size: 9px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 8px;
+    }
+
+    .stat-cell .val {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 28px;
+        font-weight: 600;
+        line-height: 1;
+    }
+
+    .stat-cell .val.green { color: var(--green); }
+    .stat-cell .val.red { color: var(--red); }
+    .stat-cell .val.amber { color: var(--amber); }
+    .stat-cell .val.white { color: #fff; }
+
+    /* blinking cursor on total */
+    .stat-cell .val.cursor::after {
+        content: '_';
+        animation: blink 1s step-end infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    /* ── MAIN GRID ── */
+    .grid {
+        display: grid;
+        grid-template-columns: 1.4fr 1fr;
+        gap: 20px;
+    }
+
+    .col-full { grid-column: 1 / -1; }
+
+    /* ── GLASS CARD ── */
+    .card {
+        background: var(--glass-bg);
+        backdrop-filter: blur(20px);
+        border: 1px solid var(--glass-border);
+        border-radius: 6px;
+        padding: 28px;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .card::before {
+        content: '';
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
+    }
+
+    .card-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 20px;
+        padding-bottom: 14px;
+        border-bottom: 1px solid var(--glass-border);
+    }
+
+    .card-header .dot {
+        width: 6px; height: 6px;
+        border-radius: 50%;
+        background: var(--green);
+        box-shadow: 0 0 8px var(--green);
+        animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    .card-header h2 {
+        font-family: 'Playfair Display', serif;
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        color: #fff;
+        text-transform: uppercase;
+    }
+
+    .card-header .mono-tag {
+        margin-left: auto;
+        font-size: 9px;
+        letter-spacing: 0.15em;
+        color: var(--muted);
+    }
+
+    /* ── SITE LIST ── */
+    .site-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 0;
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+        transition: background 0.15s;
+    }
+
+    .site-row:last-child { border-bottom: none; }
+
+    .site-row:hover {
+        background: rgba(255,255,255,0.03);
+        margin: 0 -12px;
+        padding: 10px 12px;
+        border-radius: 4px;
+    }
+
+    .rank {
+        font-size: 10px;
+        color: var(--muted);
+        width: 18px;
+        text-align: right;
+        flex-shrink: 0;
+    }
+
+    .bar-wrap {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+    }
+
+    .domain-name {
+        font-size: 12px;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: #ddd;
+    }
+
+    .bar-track {
+        height: 3px;
+        background: rgba(255,255,255,0.06);
+        border-radius: 2px;
+        overflow: hidden;
+    }
+
+    .bar-fill {
+        height: 100%;
+        border-radius: 2px;
+        transition: width 0.8s ease;
+    }
+
+    .bar-fill.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .bar-fill.red { background: var(--red); box-shadow: 0 0 6px var(--red); }
+    .bar-fill.amber { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+
+    .site-badge {
+        font-size: 8px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        padding: 2px 7px;
+        border-radius: 2px;
+        flex-shrink: 0;
+    }
+
+    .site-badge.productive { background: rgba(0,255,157,0.12); color: var(--green); border: 1px solid rgba(0,255,157,0.25); }
+    .site-badge.distracting { background: rgba(255,45,85,0.12); color: var(--red); border: 1px solid rgba(255,45,85,0.25); }
+    .site-badge.neutral { background: rgba(255,184,0,0.12); color: var(--amber); border: 1px solid rgba(255,184,0,0.25); }
+
+    .site-time {
+        font-size: 11px;
+        font-weight: 600;
+        color: #aaa;
+        flex-shrink: 0;
+        text-align: right;
+        min-width: 52px;
+    }
+
+    /* ── CHART ── */
+    .chart-container {
+        position: relative;
+        height: 260px;
+    }
+
+    /* ── AI FEEDBACK ── */
+    .persona-btns {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 18px;
+    }
+
+    .persona-btn {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 10px;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        padding: 8px 18px;
+        border-radius: 3px;
+        border: 1px solid;
+        cursor: pointer;
+        background: transparent;
+        transition: all 0.2s;
+    }
+
+    .persona-btn:hover { filter: brightness(1.3); transform: translateY(-1px); }
+    .persona-btn:active { transform: translateY(0); }
+
+    .persona-btn.coach { color: var(--green); border-color: var(--green); }
+    .persona-btn.coach:hover { background: rgba(0,255,157,0.1); }
+    .persona-btn.advisor { color: var(--red); border-color: var(--red); }
+    .persona-btn.advisor:hover { background: rgba(255,45,85,0.1); }
+    .persona-btn.mentor { color: var(--purple); border-color: var(--purple); }
+    .persona-btn.mentor:hover { background: rgba(184,127,255,0.1); }
+
+    .feedback-box {
+        background: rgba(0,0,0,0.3);
+        border: 1px solid var(--glass-border);
+        border-radius: 4px;
+        padding: 18px 20px;
+        font-size: 13px;
+        line-height: 1.8;
+        min-height: 70px;
+        color: #bbb;
+        position: relative;
+    }
+
+    .feedback-box::before {
+        content: '> ';
+        color: var(--green);
+        font-weight: 600;
+    }
+
+    .loading { color: var(--muted); font-style: italic; text-align: center; padding: 20px; font-size: 12px; }
+
+    /* Weekly divider */
+    .section-rule {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin: 8px 0 20px;
+    }
+
+    .section-rule span {
+        font-size: 9px;
+        letter-spacing: 0.25em;
+        text-transform: uppercase;
+        color: var(--muted);
+        white-space: nowrap;
+    }
+
+    .section-rule::before,
+    .section-rule::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: var(--glass-border);
+    }
+</style>
+```
+
 </head>
 <body>
-    <div class="header">
-        <h1>Attention Auditor</h1>
-        <p>watching you watch the internet</p>
+<div class="page">
+
+```
+<!-- MASTHEAD -->
+<div class="masthead">
+    <div class="masthead-left">
+        <div class="edition-label">◈ Daily Edition · Live Feed</div>
+        <h1>Attention<br><span>Auditor</span></h1>
     </div>
+    <div class="masthead-right">
+        <div class="masthead-date" id="mastheadDate">--</div>
+        <div class="masthead-tagline">watching you watch the internet</div>
+    </div>
+</div>
 
-    <div class="grid">
-        <div class="card full-width">
-            <div class="stats-row">
-                <div>
-                    <div class="stat-number" id="totalTime">--</div>
-                    <div class="stat-label">Total time tracked today</div>
-                </div>
-                <div>
-                    <div class="stat-number productive" id="productiveTime">--</div>
-                    <div class="stat-label">Productive</div>
-                </div>
-                <div>
-                    <div class="stat-number distracting" id="distractingTime">--</div>
-                    <div class="stat-label">Distracting</div>
-                </div>
-                <div>
-                    <div class="stat-number neutral" id="neutralTime">--</div>
-                    <div class="stat-label">Neutral</div>
-                </div>
-                <div>
-                    <div class="stat-number" id="siteCount">--</div>
-                    <div class="stat-label">Sites visited</div>
-                </div>
-            </div>
-        </div>
+<!-- STAT STRIP -->
+<div class="stat-strip">
+    <div class="stat-cell" data-label="Total tracked">
+        <div class="val white cursor" id="totalTime">--</div>
+    </div>
+    <div class="stat-cell" data-label="Productive">
+        <div class="val green" id="productiveTime">--</div>
+    </div>
+    <div class="stat-cell" data-label="Distracting">
+        <div class="val red" id="distractingTime">--</div>
+    </div>
+    <div class="stat-cell" data-label="Neutral">
+        <div class="val amber" id="neutralTime">--</div>
+    </div>
+    <div class="stat-cell" data-label="Sites visited">
+        <div class="val white" id="siteCount">--</div>
+    </div>
+</div>
 
-        <div class="card">
+<!-- MAIN GRID -->
+<div class="grid">
+
+    <!-- Today's list -->
+    <div class="card">
+        <div class="card-header">
+            <div class="dot"></div>
             <h2>Today's Breakdown</h2>
-            <div id="siteList" class="loading">Loading...</div>
+            <span class="mono-tag">LIVE</span>
         </div>
+        <div id="siteList" class="loading">Loading feed...</div>
+    </div>
 
-        <div class="card">
-            <h2>Time Distribution</h2>
-            <div class="chart-container">
-                <canvas id="pieChart"></canvas>
-            </div>
+    <!-- Donut -->
+    <div class="card">
+        <div class="card-header">
+            <div class="dot" style="background:var(--purple);box-shadow:0 0 8px var(--purple)"></div>
+            <h2>Distribution</h2>
+            <span class="mono-tag">TODAY</span>
         </div>
-
-        <div class="card full-width">
-            <h2>AI Insights</h2>
-            <div class="feedback-section">
-                <div class="feedback-buttons">
-                    <button class="feedback-btn coach" onclick="getFeedback('coach')">Coach</button>
-                    <button class="feedback-btn advisor" onclick="getFeedback('advisor')">Advisor</button>
-                    <button class="feedback-btn mentor" onclick="getFeedback('mentor')">Mentor</button>
-                </div>
-                <div class="feedback-text" id="feedbackText">Click a personality above to get AI feedback on your browsing habits.</div>
-            </div>
-        </div>
-
-        <div class="card full-width">
-            <h2>Weekly Totals</h2>
-            <div class="chart-container">
-                <canvas id="weeklyChart"></canvas>
-            </div>
-        </div>
-
-        <div class="card full-width">
-            <h2>All Time Usage</h2>
-            <div class="chart-container">
-                <canvas id="barChart"></canvas>
-            </div>
+        <div class="chart-container">
+            <canvas id="pieChart"></canvas>
         </div>
     </div>
 
-    <script>
-        function formatTime(seconds) {
-            seconds = Number(seconds);
-            if (seconds < 60) return seconds + "s";
-            let minutes = Math.floor(seconds / 60);
-            let secs = seconds % 60;
-            if (minutes < 60) return minutes + "m " + secs + "s";
-            let hours = Math.floor(minutes / 60);
-            minutes = minutes % 60;
-            return hours + "h " + minutes + "m";
-        }
+    <!-- AI Feedback -->
+    <div class="card col-full">
+        <div class="card-header">
+            <div class="dot" style="background:var(--purple);box-shadow:0 0 8px var(--purple);animation:none;opacity:1"></div>
+            <h2>AI Insights</h2>
+            <span class="mono-tag">CLAUDE.AI</span>
+        </div>
+        <div class="persona-btns">
+            <button class="persona-btn coach" onclick="getFeedback('coach')">// Coach</button>
+            <button class="persona-btn advisor" onclick="getFeedback('advisor')">// Advisor</button>
+            <button class="persona-btn mentor" onclick="getFeedback('mentor')">// Mentor</button>
+        </div>
+        <div class="feedback-box" id="feedbackText">Click a persona above to run analysis on your browsing habits.</div>
+    </div>
 
-        function getCategoryColor(category) {
-            if (category === "productive") return "#2cb67d";
-            if (category === "distracting") return "#e53170";
-            return "#f4a261";
-        }
+    <!-- Weekly chart -->
+    <div class="card col-full">
+        <div class="card-header">
+            <div class="dot" style="background:var(--amber);box-shadow:0 0 8px var(--amber)"></div>
+            <h2>Weekly Totals</h2>
+            <span class="mono-tag">7-DAY WINDOW</span>
+        </div>
+        <div class="chart-container">
+            <canvas id="weeklyChart"></canvas>
+        </div>
+    </div>
 
-        function filterJunk(sites) {
-            return sites.filter(s => s.domain !== "0.1" && s.domain !== "localhost");
-        }
+    <!-- All time bar -->
+    <div class="card col-full">
+        <div class="card-header">
+            <div class="dot" style="background:var(--red);box-shadow:0 0 8px var(--red)"></div>
+            <h2>All-Time Usage</h2>
+            <span class="mono-tag">CUMULATIVE</span>
+        </div>
+        <div class="chart-container">
+            <canvas id="barChart"></canvas>
+        </div>
+    </div>
 
-        function getFeedback(personality) {
-            const el = document.getElementById("feedbackText");
-            el.innerHTML = '<span class="feedback-loading">Thinking...</span>';
+</div>
+```
 
-            fetch("/api/feedback?personality=" + personality)
-                .then(r => r.json())
-                .then(data => {
-                    el.textContent = data.feedback;
-                })
-                .catch(() => {
-                    el.textContent = "Could not get feedback. Is the server running?";
+</div>
+
+<script>
+    // Set date
+    const now = new Date();
+    document.getElementById('mastheadDate').textContent =
+        now.toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' }).toUpperCase();
+
+    function formatTime(seconds) {
+        seconds = Number(seconds);
+        if (seconds < 60) return seconds + "s";
+        let minutes = Math.floor(seconds / 60);
+        let secs = seconds % 60;
+        if (minutes < 60) return minutes + "m " + secs + "s";
+        let hours = Math.floor(minutes / 60);
+        minutes = minutes % 60;
+        return hours + "h " + minutes + "m";
+    }
+
+    function getCategoryColor(category) {
+        if (category === "productive") return "#00ff9d";
+        if (category === "distracting") return "#ff2d55";
+        return "#ffb800";
+    }
+
+    function getCategoryClass(category) {
+        if (category === "productive") return "green";
+        if (category === "distracting") return "red";
+        return "amber";
+    }
+
+    function filterJunk(sites) {
+        return sites.filter(s => s.domain !== "0.1" && s.domain !== "localhost");
+    }
+
+    function getFeedback(personality) {
+        const el = document.getElementById("feedbackText");
+        el.innerHTML = '<span style="color:#5a6070;font-style:italic">Running analysis...</span>';
+        fetch("/api/feedback?personality=" + personality)
+            .then(r => r.json())
+            .then(data => { el.textContent = data.feedback; })
+            .catch(() => { el.textContent = "Could not get feedback. Is the server running?"; });
+    }
+
+    const chartDefaults = {
+        color: '#5a6070',
+        font: { family: "'IBM Plex Mono', monospace", size: 11 }
+    };
+    Chart.defaults.color = chartDefaults.color;
+    Chart.defaults.font = chartDefaults.font;
+
+    const todayDate = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0");
+
+    fetch("/api/stats?date=" + todayDate)
+        .then(r => r.json())
+        .then(data => {
+            const today = filterJunk(data.today);
+            const allTime = filterJunk(data.all_time);
+
+            const container = document.getElementById("siteList");
+            container.innerHTML = "";
+
+            if (today.length === 0) {
+                container.innerHTML = '<p class="loading">No data recorded yet today</p>';
+            } else {
+                const maxSeconds = today[0].total_seconds;
+                today.forEach((site, i) => {
+                    const pct = Math.round((site.total_seconds / maxSeconds) * 100);
+                    const cls = getCategoryClass(site.category);
+                    const div = document.createElement("div");
+                    div.className = "site-row";
+                    div.innerHTML = `
+                        <span class="rank">${i + 1}</span>
+                        <div class="bar-wrap">
+                            <div class="domain-name">${site.domain}</div>
+                            <div class="bar-track"><div class="bar-fill ${cls}" style="width:${pct}%"></div></div>
+                        </div>
+                        <span class="site-badge ${site.category || 'neutral'}">${site.category || 'neutral'}</span>
+                        <span class="site-time">${formatTime(site.total_seconds)}</span>
+                    `;
+                    container.appendChild(div);
                 });
-        }
+            }
 
-       const now = new Date();
-        const todayDate = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0");
-        fetch("/api/stats?date=" + todayDate)
-            .then(r => r.json())
-            .then(data => {
-                const today = filterJunk(data.today);
-                const allTime = filterJunk(data.all_time);
+            let productive = today.filter(s => s.category === "productive").reduce((sum, s) => sum + s.total_seconds, 0);
+            let distracting = today.filter(s => s.category === "distracting").reduce((sum, s) => sum + s.total_seconds, 0);
+            let neutral = today.filter(s => s.category === "neutral").reduce((sum, s) => sum + s.total_seconds, 0);
+            let totalSeconds = productive + distracting + neutral;
 
-                const container = document.getElementById("siteList");
-                container.innerHTML = "";
+            document.getElementById("totalTime").textContent = formatTime(totalSeconds);
+            document.getElementById("productiveTime").textContent = formatTime(productive);
+            document.getElementById("distractingTime").textContent = formatTime(distracting);
+            document.getElementById("neutralTime").textContent = formatTime(neutral);
+            document.getElementById("siteCount").textContent = today.length;
 
-                if (today.length === 0) {
-                    container.innerHTML = '<p class="loading">No data yet today</p>';
-                } else {
-                    today.forEach((site, i) => {
-                        const div = document.createElement("div");
-                        div.className = "site-row " + (site.category || "neutral");
-                        div.innerHTML = `
-                            <span class="site-rank">#${i + 1}</span>
-                            <span class="site-domain">${site.domain}</span>
-                            <span class="site-category ${site.category || 'neutral'}">${site.category || 'neutral'}</span>
-                            <span class="site-time">${formatTime(site.total_seconds)}</span>
-                        `;
-                        container.appendChild(div);
-                    });
-                }
-
-                // Category totals
-                let productive = today.filter(s => s.category === "productive").reduce((sum, s) => sum + s.total_seconds, 0);
-                let distracting = today.filter(s => s.category === "distracting").reduce((sum, s) => sum + s.total_seconds, 0);
-                let neutral = today.filter(s => s.category === "neutral").reduce((sum, s) => sum + s.total_seconds, 0);
-                let totalSeconds = productive + distracting + neutral;
-
-                document.getElementById("totalTime").textContent = formatTime(totalSeconds);
-                document.getElementById("productiveTime").textContent = formatTime(productive);
-                document.getElementById("distractingTime").textContent = formatTime(distracting);
-                document.getElementById("neutralTime").textContent = formatTime(neutral);
-                document.getElementById("siteCount").textContent = today.length;
-
-                // Donut chart — top 10 only, colored by category
-                if (today.length > 0) {
-                    const top10 = today.slice(0, 10);
-                    new Chart(document.getElementById("pieChart"), {
-                        type: "doughnut",
-                        data: {
-                            labels: top10.map(s => s.domain),
-                            datasets: [{
-                                data: top10.map(s => s.total_seconds),
-                                backgroundColor: top10.map(s => getCategoryColor(s.category))
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {
-                                legend: {
-                                    position: "right",
-                                    labels: { color: "#e0e0e0", font: { size: 12 } }
-                                },
-                                tooltip: {
-                                    callbacks: {
-                                        label: function(ctx) {
-                                            return ctx.label + ": " + formatTime(ctx.raw);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    });
-                }
-
-                // Bar chart — all time top 10, colored by category
-                if (allTime.length > 0) {
-                    const top10 = allTime.slice(0, 10);
-                    new Chart(document.getElementById("barChart"), {
-                        type: "bar",
-                        data: {
-                            labels: top10.map(s => s.domain),
-                            datasets: [{
-                                label: "Total time",
-                                data: top10.map(s => Number(s.total_seconds)),
-                                backgroundColor: top10.map(s => getCategoryColor(s.category))
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            scales: {
-                                y: {
-                                    ticks: {
-                                        color: "#888",
-                                        callback: function(val) { return formatTime(val); }
-                                    },
-                                    grid: { color: "#1f2b47" }
-                                },
-                                x: {
-                                    ticks: { color: "#e0e0e0" },
-                                    grid: { display: false }
-                                }
+            if (today.length > 0) {
+                const top10 = today.slice(0, 10);
+                new Chart(document.getElementById("pieChart"), {
+                    type: "doughnut",
+                    data: {
+                        labels: top10.map(s => s.domain),
+                        datasets: [{
+                            data: top10.map(s => s.total_seconds),
+                            backgroundColor: top10.map(s => getCategoryColor(s.category) + 'cc'),
+                            borderColor: top10.map(s => getCategoryColor(s.category)),
+                            borderWidth: 1,
+                            hoverOffset: 8
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        cutout: '65%',
+                        plugins: {
+                            legend: {
+                                position: "right",
+                                labels: { color: "#888", font: { size: 10, family: "'IBM Plex Mono', monospace" }, boxWidth: 10, padding: 14 }
                             },
-                            plugins: {
-                                legend: { display: false },
-                                tooltip: {
-                                    callbacks: {
-                                        label: function(ctx) {
-                                            return formatTime(ctx.raw);
-                                        }
-                                    }
-                                }
+                            tooltip: {
+                                callbacks: { label: ctx => ctx.label + ": " + formatTime(ctx.raw) }
                             }
                         }
-                    });
-                }
-            })
-            .catch(err => {
-                document.getElementById("siteList").innerHTML = '<p class="loading">Could not load data</p>';
-            });
-
-        fetch("/api/stats/weekly")
-            .then(r => r.json())
-            .then(weekly => {
-                if (weekly.daily_totals.length > 0) {
-                    // Fill in all 7 days, even if no data
-                    const today = new Date();
-                    const days = [];
-                    const totals = [];
-                    const dataMap = {};
-
-                    weekly.daily_totals.forEach(d => {
-                        dataMap[d.visit_date] = Number(d.total);
-                    });
-
-                    for (let i = 6; i >= 0; i--) {
-                        const date = new Date(today);
-                        date.setDate(today.getDate() - i);
-                        const key = date.toISOString().split("T")[0];
-                        days.push(key);
-                        totals.push(dataMap[key] || 0);
                     }
+                });
+            }
 
-                    new Chart(document.getElementById("weeklyChart"), {
-                        type: "line",
-                        data: {
-                            labels: days,
-                            datasets: [{
-                                label: "Total browsing time",
-                                data: totals,
-                                borderColor: "#7f5af0",
-                                backgroundColor: "rgba(127, 90, 240, 0.1)",
-                                fill: true,
-                                tension: 0.3,
-                                pointBackgroundColor: "#2cb67d",
-                                pointRadius: 6
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            scales: {
-                                y: {
-                                    ticks: {
-                                        color: "#888",
-                                        callback: function(val) { return formatTime(val); }
-                                    },
-                                    grid: { color: "#1f2b47" }
-                                },
-                                x: {
-                                    ticks: { color: "#e0e0e0" },
-                                    grid: { display: false }
-                                }
+            if (allTime.length > 0) {
+                const top10 = allTime.slice(0, 10);
+                new Chart(document.getElementById("barChart"), {
+                    type: "bar",
+                    data: {
+                        labels: top10.map(s => s.domain),
+                        datasets: [{
+                            data: top10.map(s => Number(s.total_seconds)),
+                            backgroundColor: top10.map(s => getCategoryColor(s.category) + '33'),
+                            borderColor: top10.map(s => getCategoryColor(s.category)),
+                            borderWidth: 1,
+                            borderRadius: 3
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                ticks: { color: "#5a6070", callback: val => formatTime(val) },
+                                grid: { color: "rgba(255,255,255,0.04)" }
                             },
-                            plugins: {
-                                legend: { display: false },
-                                tooltip: {
-                                    callbacks: {
-                                        label: function(ctx) {
-                                            return formatTime(ctx.raw);
-                                        }
-                                    }
-                                }
+                            x: {
+                                ticks: { color: "#888" },
+                                grid: { display: false }
                             }
+                        },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { callbacks: { label: ctx => formatTime(ctx.raw) } }
                         }
-                    });
+                    }
+                });
+            }
+        })
+        .catch(() => {
+            document.getElementById("siteList").innerHTML = '<p class="loading">Could not load data</p>';
+        });
+
+    fetch("/api/stats/weekly")
+        .then(r => r.json())
+        .then(weekly => {
+            if (weekly.daily_totals.length > 0) {
+                const today = new Date();
+                const days = [], totals = [], dataMap = {};
+                weekly.daily_totals.forEach(d => { dataMap[d.visit_date] = Number(d.total); });
+                for (let i = 6; i >= 0; i--) {
+                    const date = new Date(today);
+                    date.setDate(today.getDate() - i);
+                    const key = date.toISOString().split("T")[0];
+                    days.push(key);
+                    totals.push(dataMap[key] || 0);
                 }
-            })
-            .catch(err => {
-                console.log("Could not load weekly data:", err);
-            });
-    </script>
+                new Chart(document.getElementById("weeklyChart"), {
+                    type: "line",
+                    data: {
+                        labels: days,
+                        datasets: [{
+                            data: totals,
+                            borderColor: "#b87fff",
+                            backgroundColor: "rgba(184,127,255,0.08)",
+                            fill: true,
+                            tension: 0.4,
+                            pointBackgroundColor: "#b87fff",
+                            pointBorderColor: "#060810",
+                            pointBorderWidth: 2,
+                            pointRadius: 5,
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                ticks: { color: "#5a6070", callback: val => formatTime(val) },
+                                grid: { color: "rgba(255,255,255,0.04)" }
+                            },
+                            x: {
+                                ticks: { color: "#888" },
+                                grid: { display: false }
+                            }
+                        },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { callbacks: { label: ctx => formatTime(ctx.raw) } }
+                        }
+                    }
+                });
+            }
+        })
+        .catch(() => {});
+</script>
+
 </body>
 </html>
