@@ -2,7 +2,7 @@
 
 A Chrome browser extension that tracks your browsing habits, stores usage data in a cloud database, and uses AI to categorize sites and generate personalized motivational feedback.
 
-**Live Dashboard:** [attention-auditor-production.up.railway.app](https://attention-auditor-production.up.railway.app)
+**Live Dashboard:** After deployment, your dashboard will be available at your Railway URL.
 
 ---
 
