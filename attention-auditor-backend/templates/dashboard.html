@@ -1,12 +1,11 @@
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Attention Auditor</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=Share+Tech+Mono&family=Playfair+Display:wght@700;900&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
     <style>
         :root {
             --green: #00ff9d;
@@ -19,433 +18,345 @@
             --text: #e8e8e8;
             --muted: #5a6070;
         }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'IBM Plex Mono', monospace;
+            background-color: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(ellipse 80% 60% at 20% 10%, rgba(0,100,60,0.12) 0%, transparent 60%),
+                radial-gradient(ellipse 60% 50% at 80% 80%, rgba(80,0,120,0.14) 0%, transparent 60%),
+                radial-gradient(ellipse 40% 40% at 50% 50%, rgba(0,40,80,0.1) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.08) 3px, rgba(0,0,0,0.08) 4px);
+            pointer-events: none;
+            z-index: 1;
+        }
+        .page {
+            position: relative;
+            z-index: 2;
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 40px 32px;
+        }
+        .masthead {
+            border-top: 1px solid var(--glass-border);
+            border-bottom: 1px solid var(--glass-border);
+            padding: 24px 0 20px;
+            margin-bottom: 40px;
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+        }
+        .masthead-left { display: flex; flex-direction: column; }
+        .edition-label {
+            font-size: 10px;
+            letter-spacing: 0.25em;
+            color: var(--green);
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+        .masthead h1 {
+            font-family: 'Playfair Display', serif;
+            font-size: clamp(42px, 6vw, 80px);
+            font-weight: 900;
+            line-height: 0.9;
+            letter-spacing: -2px;
+            color: #fff;
+        }
+        .masthead h1 span { color: var(--green); }
+        .masthead-right { text-align: right; }
+        .masthead-date { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; }
+        .masthead-tagline { font-size: 11px; color: var(--muted); font-style: italic; margin-top: 4px; }
 
-    body {
-        font-family: 'IBM Plex Mono', monospace;
-        background-color: var(--bg);
-        color: var(--text);
-        min-height: 100vh;
-        overflow-x: hidden;
-    }
+        .stat-strip {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 1px;
+            background: var(--glass-border);
+            border: 1px solid var(--glass-border);
+            border-radius: 4px;
+            margin-bottom: 32px;
+            overflow: hidden;
+        }
+        .stat-cell {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            padding: 20px 24px;
+        }
+        .stat-cell::before {
+            content: attr(data-label);
+            display: block;
+            font-size: 9px;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 8px;
+        }
+        .stat-cell .val {
+            font-size: 28px;
+            font-weight: 600;
+            line-height: 1;
+        }
+        .stat-cell .val.green { color: var(--green); }
+        .stat-cell .val.red { color: var(--red); }
+        .stat-cell .val.amber { color: var(--amber); }
+        .stat-cell .val.white { color: #fff; }
+        .stat-cell .val.cursor::after {
+            content: '_';
+            animation: blink 1s step-end infinite;
+        }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
 
-    /* Atmospheric background */
-    body::before {
-        content: '';
-        position: fixed;
-        inset: 0;
-        background:
-            radial-gradient(ellipse 80% 60% at 20% 10%, rgba(0,100,60,0.12) 0%, transparent 60%),
-            radial-gradient(ellipse 60% 50% at 80% 80%, rgba(80,0,120,0.14) 0%, transparent 60%),
-            radial-gradient(ellipse 40% 40% at 50% 50%, rgba(0,40,80,0.1) 0%, transparent 70%);
-        pointer-events: none;
-        z-index: 0;
-    }
+        .grid {
+            display: grid;
+            grid-template-columns: 1.4fr 1fr;
+            gap: 20px;
+        }
+        .col-full { grid-column: 1 / -1; }
 
-    /* Subtle scanlines */
-    body::after {
-        content: '';
-        position: fixed;
-        inset: 0;
-        background: repeating-linear-gradient(
-            0deg,
-            transparent,
-            transparent 3px,
-            rgba(0,0,0,0.08) 3px,
-            rgba(0,0,0,0.08) 4px
-        );
-        pointer-events: none;
-        z-index: 1;
-    }
+        .card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 6px;
+            padding: 28px;
+            position: relative;
+            overflow: hidden;
+        }
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
+        }
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--glass-border);
+        }
+        .card-header .dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--green);
+            box-shadow: 0 0 8px var(--green);
+            animation: pulse 2s ease-in-out infinite;
+        }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        .card-header h2 {
+            font-family: 'Playfair Display', serif;
+            font-size: 15px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            color: #fff;
+            text-transform: uppercase;
+        }
+        .card-header .mono-tag {
+            margin-left: auto;
+            font-size: 9px;
+            letter-spacing: 0.15em;
+            color: var(--muted);
+        }
 
-    .page {
-        position: relative;
-        z-index: 2;
-        max-width: 1280px;
-        margin: 0 auto;
-        padding: 40px 32px;
-    }
+        .site-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            transition: background 0.15s;
+        }
+        .site-row:last-child { border-bottom: none; }
+        .site-row:hover {
+            background: rgba(255,255,255,0.03);
+            margin: 0 -12px;
+            padding: 10px 12px;
+            border-radius: 4px;
+        }
+        .rank { font-size: 10px; color: var(--muted); width: 18px; text-align: right; flex-shrink: 0; }
+        .bar-wrap { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+        .domain-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #ddd; }
+        .bar-track { height: 3px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; }
+        .bar-fill { height: 100%; border-radius: 2px; transition: width 0.8s ease; }
+        .bar-fill.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+        .bar-fill.red { background: var(--red); box-shadow: 0 0 6px var(--red); }
+        .bar-fill.amber { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+        .site-badge { font-size: 8px; letter-spacing: 0.12em; text-transform: uppercase; padding: 2px 7px; border-radius: 2px; flex-shrink: 0; }
+        .site-badge.productive { background: rgba(0,255,157,0.12); color: var(--green); border: 1px solid rgba(0,255,157,0.25); }
+        .site-badge.distracting { background: rgba(255,45,85,0.12); color: var(--red); border: 1px solid rgba(255,45,85,0.25); }
+        .site-badge.neutral { background: rgba(255,184,0,0.12); color: var(--amber); border: 1px solid rgba(255,184,0,0.25); }
+        .site-time { font-size: 11px; font-weight: 600; color: #aaa; flex-shrink: 0; text-align: right; min-width: 52px; }
+        .chart-container { position: relative; height: 260px; }
+        .loading { color: var(--muted); font-style: italic; text-align: center; padding: 20px; font-size: 12px; }
 
-    /* ── MASTHEAD ── */
-    .masthead {
-        border-top: 1px solid var(--glass-border);
-        border-bottom: 1px solid var(--glass-border);
-        padding: 24px 0 20px;
-        margin-bottom: 40px;
-        display: flex;
-        align-items: flex-end;
-        justify-content: space-between;
-    }
+        .show-more-btn {
+            display: block;
+            width: 100%;
+            margin-top: 12px;
+            padding: 8px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--glass-border);
+            border-radius: 4px;
+            color: var(--muted);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .show-more-btn:hover { background: rgba(255,255,255,0.08); color: var(--text); }
 
-    .masthead-left {
-        display: flex;
-        flex-direction: column;
-    }
+        /* Anomaly flags */
+        .anomaly-flag {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        .anomaly-flag .icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+        .anomaly-flag.alert { background: rgba(255,45,85,0.1); border: 1px solid rgba(255,45,85,0.2); color: var(--red); }
+        .anomaly-flag.warning { background: rgba(255,184,0,0.1); border: 1px solid rgba(255,184,0,0.2); color: var(--amber); }
+        .anomaly-flag.positive { background: rgba(0,255,157,0.1); border: 1px solid rgba(0,255,157,0.2); color: var(--green); }
+        .anomaly-flag.info { background: rgba(184,127,255,0.1); border: 1px solid rgba(184,127,255,0.2); color: var(--purple); }
+        .anomaly-flag.none { background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); color: var(--muted); }
+        .anomaly-comparison {
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid var(--glass-border);
+            display: flex;
+            gap: 24px;
+            font-size: 11px;
+            color: var(--muted);
+        }
+        .anomaly-comparison .val { font-weight: 600; color: var(--text); }
 
-    .edition-label {
-        font-family: 'IBM Plex Mono', monospace;
-        font-size: 10px;
-        letter-spacing: 0.25em;
-        color: var(--green);
-        text-transform: uppercase;
-        margin-bottom: 6px;
-    }
+        /* AI section */
+        .ai-tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--glass-border);
+        }
+        .ai-tab {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            padding: 10px 20px;
+            border: none;
+            background: transparent;
+            color: var(--muted);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .ai-tab:hover { color: var(--text); }
+        .ai-tab.active { color: var(--purple); border-bottom-color: var(--purple); }
+        .ai-panel { display: none; }
+        .ai-panel.active { display: block; }
 
-    .masthead h1 {
-        font-family: 'Playfair Display', serif;
-        font-size: clamp(42px, 6vw, 80px);
-        font-weight: 900;
-        line-height: 0.9;
-        letter-spacing: -2px;
-        color: #fff;
-    }
+        .persona-btns { display: flex; gap: 8px; margin-bottom: 18px; }
+        .persona-btn {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            padding: 8px 18px;
+            border-radius: 3px;
+            border: 1px solid;
+            cursor: pointer;
+            background: transparent;
+            transition: all 0.2s;
+        }
+        .persona-btn:hover { filter: brightness(1.3); transform: translateY(-1px); }
+        .persona-btn.coach { color: var(--green); border-color: var(--green); }
+        .persona-btn.coach:hover { background: rgba(0,255,157,0.1); }
+        .persona-btn.advisor { color: var(--red); border-color: var(--red); }
+        .persona-btn.advisor:hover { background: rgba(255,45,85,0.1); }
+        .persona-btn.mentor { color: var(--purple); border-color: var(--purple); }
+        .persona-btn.mentor:hover { background: rgba(184,127,255,0.1); }
 
-    .masthead h1 span {
-        color: var(--green);
-    }
+        .generate-btn {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            padding: 10px 24px;
+            border-radius: 3px;
+            border: 1px solid var(--purple);
+            color: var(--purple);
+            background: transparent;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 18px;
+        }
+        .generate-btn:hover { background: rgba(184,127,255,0.1); transform: translateY(-1px); }
 
-    .masthead-right {
-        text-align: right;
-    }
+        .feedback-box {
+            background: rgba(0,0,0,0.3);
+            border: 1px solid var(--glass-border);
+            border-radius: 4px;
+            padding: 18px 20px;
+            font-size: 13px;
+            line-height: 1.8;
+            min-height: 70px;
+            color: #bbb;
+            white-space: pre-wrap;
+        }
 
-    .masthead-date {
-        font-size: 11px;
-        color: var(--muted);
-        letter-spacing: 0.1em;
-    }
-
-    .masthead-tagline {
-        font-size: 11px;
-        color: var(--muted);
-        font-style: italic;
-        margin-top: 4px;
-    }
-
-    /* ── STAT STRIP ── */
-    .stat-strip {
-        display: grid;
-        grid-template-columns: repeat(5, 1fr);
-        gap: 1px;
-        background: var(--glass-border);
-        border: 1px solid var(--glass-border);
-        border-radius: 4px;
-        margin-bottom: 32px;
-        overflow: hidden;
-    }
-
-    .stat-cell {
-        background: var(--glass-bg);
-        backdrop-filter: blur(12px);
-        padding: 20px 24px;
-        position: relative;
-    }
-
-    .stat-cell::before {
-        content: attr(data-label);
-        display: block;
-        font-size: 9px;
-        letter-spacing: 0.2em;
-        text-transform: uppercase;
-        color: var(--muted);
-        margin-bottom: 8px;
-    }
-
-    .stat-cell .val {
-        font-family: 'IBM Plex Mono', monospace;
-        font-size: 28px;
-        font-weight: 600;
-        line-height: 1;
-    }
-
-    .stat-cell .val.green { color: var(--green); }
-    .stat-cell .val.red { color: var(--red); }
-    .stat-cell .val.amber { color: var(--amber); }
-    .stat-cell .val.white { color: #fff; }
-
-    /* blinking cursor on total */
-    .stat-cell .val.cursor::after {
-        content: '_';
-        animation: blink 1s step-end infinite;
-    }
-    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-
-    /* ── MAIN GRID ── */
-    .grid {
-        display: grid;
-        grid-template-columns: 1.4fr 1fr;
-        gap: 20px;
-    }
-
-    .col-full { grid-column: 1 / -1; }
-
-    /* ── GLASS CARD ── */
-    .card {
-        background: var(--glass-bg);
-        backdrop-filter: blur(20px);
-        border: 1px solid var(--glass-border);
-        border-radius: 6px;
-        padding: 28px;
-        position: relative;
-        overflow: hidden;
-    }
-
-    .card::before {
-        content: '';
-        position: absolute;
-        top: 0; left: 0; right: 0;
-        height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
-    }
-
-    .card-header {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-bottom: 20px;
-        padding-bottom: 14px;
-        border-bottom: 1px solid var(--glass-border);
-    }
-
-    .card-header .dot {
-        width: 6px; height: 6px;
-        border-radius: 50%;
-        background: var(--green);
-        box-shadow: 0 0 8px var(--green);
-        animation: pulse 2s ease-in-out infinite;
-    }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-
-    .card-header h2 {
-        font-family: 'Playfair Display', serif;
-        font-size: 15px;
-        font-weight: 700;
-        letter-spacing: 0.05em;
-        color: #fff;
-        text-transform: uppercase;
-    }
-
-    .card-header .mono-tag {
-        margin-left: auto;
-        font-size: 9px;
-        letter-spacing: 0.15em;
-        color: var(--muted);
-    }
-
-    /* ── SITE LIST ── */
-    .site-row {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 10px 0;
-        border-bottom: 1px solid rgba(255,255,255,0.04);
-        transition: background 0.15s;
-    }
-
-    .site-row:last-child { border-bottom: none; }
-
-    .site-row:hover {
-        background: rgba(255,255,255,0.03);
-        margin: 0 -12px;
-        padding: 10px 12px;
-        border-radius: 4px;
-    }
-
-    .rank {
-        font-size: 10px;
-        color: var(--muted);
-        width: 18px;
-        text-align: right;
-        flex-shrink: 0;
-    }
-
-    .bar-wrap {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        min-width: 0;
-    }
-
-    .domain-name {
-        font-size: 12px;
-        font-weight: 600;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        color: #ddd;
-    }
-
-    .bar-track {
-        height: 3px;
-        background: rgba(255,255,255,0.06);
-        border-radius: 2px;
-        overflow: hidden;
-    }
-
-    .bar-fill {
-        height: 100%;
-        border-radius: 2px;
-        transition: width 0.8s ease;
-    }
-
-    .bar-fill.green { background: var(--green); box-shadow: 0 0 6px var(--green); }
-    .bar-fill.red { background: var(--red); box-shadow: 0 0 6px var(--red); }
-    .bar-fill.amber { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
-
-    .site-badge {
-        font-size: 8px;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        padding: 2px 7px;
-        border-radius: 2px;
-        flex-shrink: 0;
-    }
-
-    .site-badge.productive { background: rgba(0,255,157,0.12); color: var(--green); border: 1px solid rgba(0,255,157,0.25); }
-    .site-badge.distracting { background: rgba(255,45,85,0.12); color: var(--red); border: 1px solid rgba(255,45,85,0.25); }
-    .site-badge.neutral { background: rgba(255,184,0,0.12); color: var(--amber); border: 1px solid rgba(255,184,0,0.25); }
-
-    .site-time {
-        font-size: 11px;
-        font-weight: 600;
-        color: #aaa;
-        flex-shrink: 0;
-        text-align: right;
-        min-width: 52px;
-    }
-
-    /* ── CHART ── */
-    .chart-container {
-        position: relative;
-        height: 260px;
-    }
-
-    /* ── AI FEEDBACK ── */
-    .persona-btns {
-        display: flex;
-        gap: 8px;
-        margin-bottom: 18px;
-    }
-    .api-key-row {
-        display: flex;
-        gap: 10px;
-        align-items: center;
-        margin: 6px 0 14px;
-        flex-wrap: wrap;
-    }
-    .api-key-row label {
-        font-size: 10px;
-        letter-spacing: 0.15em;
-        color: var(--muted);
-        text-transform: uppercase;
-        white-space: nowrap;
-    }
-    .api-key-row input {
-        flex: 1;
-        min-width: 240px;
-        font-family: 'IBM Plex Mono', monospace;
-        font-size: 11px;
-        padding: 10px 12px;
-        border-radius: 4px;
-        border: 1px solid var(--glass-border);
-        background: rgba(0,0,0,0.25);
-        color: #ddd;
-        outline: none;
-    }
-    .api-key-row button {
-        font-family: 'IBM Plex Mono', monospace;
-        font-size: 10px;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        padding: 10px 14px;
-        border-radius: 4px;
-        border: 1px solid var(--glass-border);
-        background: rgba(184,127,255,0.12);
-        color: #ddd;
-        cursor: pointer;
-    }
-    .api-key-row button:hover { filter: brightness(1.15); }
-    .api-key-row .hint {
-        font-size: 10px;
-        color: var(--muted);
-        flex-basis: 100%;
-    }
-
-    .persona-btn {
-        font-family: 'IBM Plex Mono', monospace;
-        font-size: 10px;
-        letter-spacing: 0.15em;
-        text-transform: uppercase;
-        padding: 8px 18px;
-        border-radius: 3px;
-        border: 1px solid;
-        cursor: pointer;
-        background: transparent;
-        transition: all 0.2s;
-    }
-
-    .persona-btn:hover { filter: brightness(1.3); transform: translateY(-1px); }
-    .persona-btn:active { transform: translateY(0); }
-
-    .persona-btn.coach { color: var(--green); border-color: var(--green); }
-    .persona-btn.coach:hover { background: rgba(0,255,157,0.1); }
-    .persona-btn.advisor { color: var(--red); border-color: var(--red); }
-    .persona-btn.advisor:hover { background: rgba(255,45,85,0.1); }
-    .persona-btn.mentor { color: var(--purple); border-color: var(--purple); }
-    .persona-btn.mentor:hover { background: rgba(184,127,255,0.1); }
-
-    .feedback-box {
-        background: rgba(0,0,0,0.3);
-        border: 1px solid var(--glass-border);
-        border-radius: 4px;
-        padding: 18px 20px;
-        font-size: 13px;
-        line-height: 1.8;
-        min-height: 70px;
-        color: #bbb;
-        position: relative;
-    }
-
-    .feedback-box::before {
-        content: '> ';
-        color: var(--green);
-        font-weight: 600;
-    }
-
-    .loading { color: var(--muted); font-style: italic; text-align: center; padding: 20px; font-size: 12px; }
-
-    /* Weekly divider */
-    .section-rule {
-        display: flex;
-        align-items: center;
-        gap: 16px;
-        margin: 8px 0 20px;
-    }
-
-    .section-rule span {
-        font-size: 9px;
-        letter-spacing: 0.25em;
-        text-transform: uppercase;
-        color: var(--muted);
-        white-space: nowrap;
-    }
-
-    .section-rule::before,
-    .section-rule::after {
-        content: '';
-        flex: 1;
-        height: 1px;
-        background: var(--glass-border);
-    }
-</style>
-
+        .api-key-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin: 0 0 14px;
+            flex-wrap: wrap;
+        }
+        .api-key-row label { font-size: 10px; letter-spacing: 0.15em; color: var(--muted); text-transform: uppercase; white-space: nowrap; }
+        .api-key-row input {
+            flex: 1; min-width: 240px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 11px; padding: 10px 12px;
+            border-radius: 4px; border: 1px solid var(--glass-border);
+            background: rgba(0,0,0,0.25); color: #ddd; outline: none;
+        }
+        .api-key-row button {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+            padding: 10px 14px; border-radius: 4px;
+            border: 1px solid var(--glass-border);
+            background: rgba(184,127,255,0.12); color: #ddd; cursor: pointer;
+        }
+        .api-key-row .hint { font-size: 10px; color: var(--muted); flex-basis: 100%; }
+    </style>
 </head>
 <body>
 <div class="page">
-<!-- MASTHEAD -->
+
 <div class="masthead">
     <div class="masthead-left">
-        <div class="edition-label">◈ Daily Edition · Live Feed</div>
+        <div class="edition-label">&#9670; Daily Edition &middot; Live Feed</div>
         <h1>Attention<br><span>Auditor</span></h1>
     </div>
     <div class="masthead-right">
@@ -454,26 +365,14 @@
     </div>
 </div>
 
-<!-- STAT STRIP -->
 <div class="stat-strip">
-    <div class="stat-cell" data-label="Total tracked">
-        <div class="val white cursor" id="totalTime">--</div>
-    </div>
-    <div class="stat-cell" data-label="Productive">
-        <div class="val green" id="productiveTime">--</div>
-    </div>
-    <div class="stat-cell" data-label="Distracting">
-        <div class="val red" id="distractingTime">--</div>
-    </div>
-    <div class="stat-cell" data-label="Neutral">
-        <div class="val amber" id="neutralTime">--</div>
-    </div>
-    <div class="stat-cell" data-label="Sites visited">
-        <div class="val white" id="siteCount">--</div>
-    </div>
+    <div class="stat-cell" data-label="Total tracked"><div class="val white cursor" id="totalTime">--</div></div>
+    <div class="stat-cell" data-label="Productive"><div class="val green" id="productiveTime">--</div></div>
+    <div class="stat-cell" data-label="Distracting"><div class="val red" id="distractingTime">--</div></div>
+    <div class="stat-cell" data-label="Neutral"><div class="val amber" id="neutralTime">--</div></div>
+    <div class="stat-cell" data-label="Sites visited"><div class="val white" id="siteCount">--</div></div>
 </div>
 
-<!-- MAIN GRID -->
 <div class="grid">
 
     <!-- Today's list -->
@@ -486,37 +385,45 @@
         <div id="siteList" class="loading">Loading feed...</div>
     </div>
 
-    <!-- Donut -->
+    <!-- Anomaly Detection (replaces donut) -->
     <div class="card">
         <div class="card-header">
-            <div class="dot" style="background:var(--purple);box-shadow:0 0 8px var(--purple)"></div>
-            <h2>Distribution</h2>
-            <span class="mono-tag">TODAY</span>
+            <div class="dot" style="background:var(--red);box-shadow:0 0 8px var(--red)"></div>
+            <h2>Anomalies</h2>
+            <span class="mono-tag">VS 7-DAY AVG</span>
         </div>
-        <div class="chart-container">
-            <canvas id="pieChart"></canvas>
-        </div>
+        <div id="anomalyList" class="loading">Scanning...</div>
     </div>
 
-    <!-- AI Feedback -->
+    <!-- AI Section with tabs -->
     <div class="card col-full">
         <div class="card-header">
             <div class="dot" style="background:var(--purple);box-shadow:0 0 8px var(--purple);animation:none;opacity:1"></div>
-            <h2>AI Insights</h2>
-            <span class="mono-tag">CLAUDE.AI</span>
+            <h2>AI Analysis</h2>
+            <span class="mono-tag">OPENAI</span>
         </div>
         <div class="api-key-row">
             <label for="apiKeyInput">API key</label>
-            <input id="apiKeyInput" placeholder="Paste ATTENTION_AUDITOR_API_KEY to unlock dashboard API calls" />
+            <input id="apiKeyInput" placeholder="Paste ATTENTION_AUDITOR_API_KEY" />
             <button onclick="saveApiKey()">Save</button>
-            <div class="hint">Stored locally in your browser (localStorage). Sent as <span style="color:#888">X-ATTENTION-AUDITOR-KEY</span>.</div>
+            <div class="hint">Required for AI features. Stored in your browser only.</div>
         </div>
-        <div class="persona-btns">
-            <button class="persona-btn coach" onclick="getFeedback('coach')">// Coach</button>
-            <button class="persona-btn advisor" onclick="getFeedback('advisor')">// Advisor</button>
-            <button class="persona-btn mentor" onclick="getFeedback('mentor')">// Mentor</button>
+        <div class="ai-tabs">
+            <button class="ai-tab active" onclick="switchTab('feedback')">Quick Feedback</button>
+            <button class="ai-tab" onclick="switchTab('weekly')">Weekly Report</button>
         </div>
-        <div class="feedback-box" id="feedbackText">Click a persona above to run analysis on your browsing habits.</div>
+        <div class="ai-panel active" id="panel-feedback">
+            <div class="persona-btns">
+                <button class="persona-btn coach" onclick="getFeedback('coach')">// Coach</button>
+                <button class="persona-btn advisor" onclick="getFeedback('advisor')">// Advisor</button>
+                <button class="persona-btn mentor" onclick="getFeedback('mentor')">// Mentor</button>
+            </div>
+            <div class="feedback-box" id="feedbackText">Click a persona above to run analysis.</div>
+        </div>
+        <div class="ai-panel" id="panel-weekly">
+            <button class="generate-btn" onclick="getWeeklyReport()">// Generate Weekly Report</button>
+            <div class="feedback-box" id="weeklyReportText">Click above to generate your weekly narrative report.</div>
+        </div>
     </div>
 
     <!-- Weekly chart -->
@@ -544,14 +451,14 @@
     </div>
 
 </div>
-
 </div>
 
 <script>
-    // Set date
     const now = new Date();
     document.getElementById('mastheadDate').textContent =
         now.toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' }).toUpperCase();
+
+    const todayDate = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0");
 
     function formatTime(seconds) {
         seconds = Number(seconds);
@@ -564,82 +471,72 @@
         return hours + "h " + minutes + "m";
     }
 
-    function getCategoryColor(category) {
-        if (category === "productive") return "#00ff9d";
-        if (category === "distracting") return "#ff2d55";
+    function getCategoryColor(cat) {
+        if (cat === "productive") return "#00ff9d";
+        if (cat === "distracting") return "#ff2d55";
         return "#ffb800";
     }
-
-    function getCategoryClass(category) {
-        if (category === "productive") return "green";
-        if (category === "distracting") return "red";
+    function getCategoryClass(cat) {
+        if (cat === "productive") return "green";
+        if (cat === "distracting") return "red";
         return "amber";
     }
-
     function filterJunk(sites) {
         return sites.filter(s => s.domain !== "0.1" && s.domain !== "localhost");
     }
 
-    // Optional API key for secured API endpoints (stored in localStorage).
     function getApiKey() {
-        try { return localStorage.getItem("attentionAuditorApiKey") || ""; }
-        catch { return ""; }
+        try { return localStorage.getItem("attentionAuditorApiKey") || ""; } catch { return ""; }
     }
     function authHeaders() {
         const key = getApiKey().trim();
         return key ? { "X-ATTENTION-AUDITOR-KEY": key } : {};
     }
-
     function saveApiKey() {
         const input = document.getElementById("apiKeyInput");
         if (!input) return;
-        try {
-            localStorage.setItem("attentionAuditorApiKey", String(input.value || "").trim());
-            // Refresh data after saving
-            location.reload();
-        } catch {}
+        try { localStorage.setItem("attentionAuditorApiKey", String(input.value || "").trim()); location.reload(); } catch {}
     }
-
-    // Pre-fill input if key exists
-    (function initApiKey() {
+    (function() {
         const input = document.getElementById("apiKeyInput");
-        if (!input) return;
-        const existing = getApiKey();
-        if (existing) input.value = existing;
+        if (input) input.value = getApiKey();
     })();
+
+    // Tab switching
+    function switchTab(tab) {
+        document.querySelectorAll('.ai-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.ai-panel').forEach(p => p.classList.remove('active'));
+        event.target.classList.add('active');
+        document.getElementById('panel-' + tab).classList.add('active');
+    }
 
     function getFeedback(personality) {
         const el = document.getElementById("feedbackText");
-        el.innerHTML = '<span style="color:#5a6070;font-style:italic">Running analysis...</span>';
+        el.textContent = "Running analysis...";
         fetch("/api/feedback?personality=" + personality, { headers: authHeaders() })
-            .then(async (r) => {
-                const data = await r.json().catch(() => ({}));
-                if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
-                return data;
-            })
-            .then(data => { el.textContent = data.feedback; })
-            .catch((e) => { el.textContent = `Could not get feedback: ${e.message}`; });
+            .then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.error || "HTTP " + r.status); return d; })
+            .then(d => { el.textContent = d.feedback; })
+            .catch(e => { el.textContent = "Error: " + e.message; });
     }
 
-    const chartDefaults = {
-        color: '#5a6070',
-        font: { family: "'IBM Plex Mono', monospace", size: 11 }
-    };
-    Chart.defaults.color = chartDefaults.color;
-    Chart.defaults.font = chartDefaults.font;
+    function getWeeklyReport() {
+        const el = document.getElementById("weeklyReportText");
+        el.textContent = "Generating weekly report...";
+        fetch("/api/weekly-report", { headers: authHeaders() })
+            .then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.error || "HTTP " + r.status); return d; })
+            .then(d => { el.textContent = d.report; })
+            .catch(e => { el.textContent = "Error: " + e.message; });
+    }
 
-    const todayDate = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0");
+    Chart.defaults.color = '#5a6070';
+    Chart.defaults.font = { family: "'IBM Plex Mono', monospace", size: 11 };
 
+    // Load stats
     fetch("/api/stats?date=" + todayDate, { headers: authHeaders() })
-        .then(async (r) => {
-            const data = await r.json().catch(() => ({}));
-            if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
-            return data;
-        })
+        .then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.error); return d; })
         .then(data => {
             const today = filterJunk(data.today);
             const allTime = filterJunk(data.all_time);
-
             const container = document.getElementById("siteList");
             container.innerHTML = "";
 
@@ -647,65 +544,48 @@
                 container.innerHTML = '<p class="loading">No data recorded yet today</p>';
             } else {
                 const maxSeconds = today[0].total_seconds;
-                today.forEach((site, i) => {
-                    const pct = Math.round((site.total_seconds / maxSeconds) * 100);
-                    const cls = getCategoryClass(site.category);
-                    const div = document.createElement("div");
-                    div.className = "site-row";
-                    div.innerHTML = `
-                        <span class="rank">${i + 1}</span>
-                        <div class="bar-wrap">
-                            <div class="domain-name">${site.domain}</div>
-                            <div class="bar-track"><div class="bar-fill ${cls}" style="width:${pct}%"></div></div>
-                        </div>
-                        <span class="site-badge ${site.category || 'neutral'}">${site.category || 'neutral'}</span>
-                        <span class="site-time">${formatTime(site.total_seconds)}</span>
-                    `;
-                    container.appendChild(div);
+                const initial = today.slice(0, 10);
+                const rest = today.slice(10);
+
+                initial.forEach((site, i) => {
+                    container.appendChild(createSiteRow(site, i, maxSeconds));
                 });
+
+                if (rest.length > 0) {
+                    const hiddenDiv = document.createElement("div");
+                    hiddenDiv.id = "hiddenSites";
+                    hiddenDiv.style.display = "none";
+                    rest.forEach((site, i) => {
+                        hiddenDiv.appendChild(createSiteRow(site, i + 10, maxSeconds));
+                    });
+                    container.appendChild(hiddenDiv);
+
+                    const btn = document.createElement("button");
+                    btn.className = "show-more-btn";
+                    btn.textContent = "Show " + rest.length + " more";
+                    btn.onclick = function() {
+                        const hidden = document.getElementById("hiddenSites");
+                        if (hidden.style.display === "none") {
+                            hidden.style.display = "block";
+                            btn.textContent = "Show less";
+                        } else {
+                            hidden.style.display = "none";
+                            btn.textContent = "Show " + rest.length + " more";
+                        }
+                    };
+                    container.appendChild(btn);
+                }
             }
 
             let productive = today.filter(s => s.category === "productive").reduce((sum, s) => sum + s.total_seconds, 0);
             let distracting = today.filter(s => s.category === "distracting").reduce((sum, s) => sum + s.total_seconds, 0);
             let neutral = today.filter(s => s.category === "neutral").reduce((sum, s) => sum + s.total_seconds, 0);
-            let totalSeconds = productive + distracting + neutral;
 
-            document.getElementById("totalTime").textContent = formatTime(totalSeconds);
+            document.getElementById("totalTime").textContent = formatTime(productive + distracting + neutral);
             document.getElementById("productiveTime").textContent = formatTime(productive);
             document.getElementById("distractingTime").textContent = formatTime(distracting);
             document.getElementById("neutralTime").textContent = formatTime(neutral);
             document.getElementById("siteCount").textContent = today.length;
-
-            if (today.length > 0) {
-                const top10 = today.slice(0, 10);
-                new Chart(document.getElementById("pieChart"), {
-                    type: "doughnut",
-                    data: {
-                        labels: top10.map(s => s.domain),
-                        datasets: [{
-                            data: top10.map(s => s.total_seconds),
-                            backgroundColor: top10.map(s => getCategoryColor(s.category) + 'cc'),
-                            borderColor: top10.map(s => getCategoryColor(s.category)),
-                            borderWidth: 1,
-                            hoverOffset: 8
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        cutout: '65%',
-                        plugins: {
-                            legend: {
-                                position: "right",
-                                labels: { color: "#888", font: { size: 10, family: "'IBM Plex Mono', monospace" }, boxWidth: 10, padding: 14 }
-                            },
-                            tooltip: {
-                                callbacks: { label: ctx => ctx.label + ": " + formatTime(ctx.raw) }
-                            }
-                        }
-                    }
-                });
-            }
 
             if (allTime.length > 0) {
                 const top10 = allTime.slice(0, 10);
@@ -717,50 +597,81 @@
                             data: top10.map(s => Number(s.total_seconds)),
                             backgroundColor: top10.map(s => getCategoryColor(s.category) + '33'),
                             borderColor: top10.map(s => getCategoryColor(s.category)),
-                            borderWidth: 1,
-                            borderRadius: 3
+                            borderWidth: 1, borderRadius: 3
                         }]
                     },
                     options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
+                        responsive: true, maintainAspectRatio: false,
                         scales: {
-                            y: {
-                                ticks: { color: "#5a6070", callback: val => formatTime(val) },
-                                grid: { color: "rgba(255,255,255,0.04)" }
-                            },
-                            x: {
-                                ticks: { color: "#888" },
-                                grid: { display: false }
-                            }
+                            y: { ticks: { color: "#5a6070", callback: val => formatTime(val) }, grid: { color: "rgba(255,255,255,0.04)" } },
+                            x: { ticks: { color: "#888" }, grid: { display: false } }
                         },
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: { callbacks: { label: ctx => formatTime(ctx.raw) } }
-                        }
+                        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => formatTime(ctx.raw) } } }
                     }
                 });
             }
         })
-        .catch(() => {
-            document.getElementById("siteList").innerHTML = '<p class="loading">Could not load data</p>';
-        });
+        .catch(() => { document.getElementById("siteList").innerHTML = '<p class="loading">Could not load data</p>'; });
 
-    fetch("/api/stats/weekly", { headers: authHeaders() })
-        .then(async (r) => {
-            const data = await r.json().catch(() => ({}));
-            if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
-            return data;
+    function createSiteRow(site, index, maxSeconds) {
+        const pct = Math.round((site.total_seconds / maxSeconds) * 100);
+        const cls = getCategoryClass(site.category);
+        const div = document.createElement("div");
+        div.className = "site-row";
+        div.innerHTML = `
+            <span class="rank">${index + 1}</span>
+            <div class="bar-wrap">
+                <div class="domain-name">${site.domain}</div>
+                <div class="bar-track"><div class="bar-fill ${cls}" style="width:${pct}%"></div></div>
+            </div>
+            <span class="site-badge ${site.category || 'neutral'}">${site.category || 'neutral'}</span>
+            <span class="site-time">${formatTime(site.total_seconds)}</span>
+        `;
+        return div;
+    }
+
+    // Load anomalies
+    fetch("/api/anomalies?date=" + todayDate, { headers: authHeaders() })
+        .then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.error); return d; })
+        .then(data => {
+            const container = document.getElementById("anomalyList");
+            container.innerHTML = "";
+
+            if (data.flags.length === 0) {
+                container.innerHTML = '<div class="anomaly-flag none"><span class="icon">&#10003;</span> Nothing unusual today. Browsing patterns are within normal range.</div>';
+            } else {
+                data.flags.forEach(flag => {
+                    const icons = { alert: "&#9888;", warning: "&#9671;", positive: "&#9650;", info: "&#8505;" };
+                    const div = document.createElement("div");
+                    div.className = "anomaly-flag " + flag.type;
+                    div.innerHTML = '<span class="icon">' + (icons[flag.type] || "&#8226;") + '</span> ' + flag.message;
+                    container.appendChild(div);
+                });
+            }
+
+            const comp = document.createElement("div");
+            comp.className = "anomaly-comparison";
+            comp.innerHTML = `
+                <div>Today productive: <span class="val">${formatTime(data.productive_today)}</span></div>
+                <div>Avg productive: <span class="val">${formatTime(data.productive_avg)}</span></div>
+                <div>Today distracting: <span class="val">${formatTime(data.distracting_today)}</span></div>
+                <div>Avg distracting: <span class="val">${formatTime(data.distracting_avg)}</span></div>
+            `;
+            container.appendChild(comp);
         })
+        .catch(() => { document.getElementById("anomalyList").innerHTML = '<p class="loading">Could not load anomalies</p>'; });
+
+    // Weekly chart
+    fetch("/api/stats/weekly", { headers: authHeaders() })
+        .then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.error); return d; })
         .then(weekly => {
             if (weekly.daily_totals.length > 0) {
-                const today = new Date();
                 const days = [], totals = [], dataMap = {};
                 weekly.daily_totals.forEach(d => { dataMap[d.visit_date] = Number(d.total); });
                 for (let i = 6; i >= 0; i--) {
-                    const date = new Date(today);
-                    date.setDate(today.getDate() - i);
-                    const key = date.toISOString().split("T")[0];
+                    const d = new Date(now);
+                    d.setDate(now.getDate() - i);
+                    const key = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
                     days.push(key);
                     totals.push(dataMap[key] || 0);
                 }
@@ -772,38 +683,24 @@
                             data: totals,
                             borderColor: "#b87fff",
                             backgroundColor: "rgba(184,127,255,0.08)",
-                            fill: true,
-                            tension: 0.4,
+                            fill: true, tension: 0.4,
                             pointBackgroundColor: "#b87fff",
                             pointBorderColor: "#060810",
-                            pointBorderWidth: 2,
-                            pointRadius: 5,
-                            borderWidth: 2
+                            pointBorderWidth: 2, pointRadius: 5, borderWidth: 2
                         }]
                     },
                     options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
+                        responsive: true, maintainAspectRatio: false,
                         scales: {
-                            y: {
-                                ticks: { color: "#5a6070", callback: val => formatTime(val) },
-                                grid: { color: "rgba(255,255,255,0.04)" }
-                            },
-                            x: {
-                                ticks: { color: "#888" },
-                                grid: { display: false }
-                            }
+                            y: { ticks: { color: "#5a6070", callback: val => formatTime(val) }, grid: { color: "rgba(255,255,255,0.04)" } },
+                            x: { ticks: { color: "#888" }, grid: { display: false } }
                         },
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: { callbacks: { label: ctx => formatTime(ctx.raw) } }
-                        }
+                        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => formatTime(ctx.raw) } } }
                     }
                 });
             }
         })
         .catch(() => {});
 </script>
-
 </body>
 </html>
