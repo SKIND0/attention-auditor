@@ -3,11 +3,40 @@ console.log("BACKGROUND SCRIPT LOADED");
 let currentSite = null;
 let startTime = null;
 let isIdle = false;
+let isWindowFocused = true;
+
+const TRACKING_STATE_KEY = "trackingState";
+
+function saveTrackingState() {
+  chrome.storage.local.set({
+    [TRACKING_STATE_KEY]: {
+      currentSite,
+      startTime,
+      isIdle,
+      isWindowFocused,
+      savedAt: Date.now(),
+    },
+  });
+}
+
+function restoreTrackingState(cb) {
+  chrome.storage.local.get([TRACKING_STATE_KEY], (result) => {
+    const st = result[TRACKING_STATE_KEY];
+    if (st) {
+      currentSite = st.currentSite ?? currentSite;
+      startTime = st.startTime ?? startTime;
+      isIdle = Boolean(st.isIdle);
+      isWindowFocused = st.isWindowFocused !== undefined ? Boolean(st.isWindowFocused) : true;
+    }
+    cb?.();
+  });
+}
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === "flushSession") {
     saveElapsed();
     if (startTime) startTime = Date.now(); // reset so we don't double-count
+    saveTrackingState();
   }
 });
 
@@ -29,6 +58,67 @@ const domainAliases = {
   "instructure.com": "touro.edu",
   "canvas.instructure.com": "touro.edu",
 };
+
+// Minimal public-suffix handling for common multi-part TLDs.
+// Full correctness requires the full Public Suffix List, but this covers the most common cases.
+const MULTI_PART_SUFFIXES = new Set([
+  // UK
+  "co.uk",
+  "org.uk",
+  "ac.uk",
+  "gov.uk",
+  "net.uk",
+  // AU
+  "com.au",
+  "net.au",
+  "org.au",
+  "edu.au",
+  "gov.au",
+  // JP
+  "co.jp",
+  "ne.jp",
+  "or.jp",
+  "ac.jp",
+  "go.jp",
+  // BR
+  "com.br",
+  "net.br",
+  "org.br",
+  "gov.br",
+  "edu.br",
+  // NZ
+  "co.nz",
+  "org.nz",
+  "govt.nz",
+  "ac.nz",
+  // ZA
+  "co.za",
+  "org.za",
+  "gov.za",
+  // Common
+  "com.cn",
+  "net.cn",
+  "org.cn",
+  "com.sg",
+  "com.hk",
+  "com.tr",
+]);
+
+function registrableDomainFromHostname(hostname) {
+  const parts = hostname.split(".").filter(Boolean);
+  if (parts.length <= 1) return hostname;
+
+  const last2 = parts.slice(-2).join(".");
+  const last3 = parts.slice(-3).join(".");
+
+  // If the TLD is multi-part (e.g. co.uk), registrable is last 3 labels.
+  if (MULTI_PART_SUFFIXES.has(last2) && parts.length >= 3) {
+    return last3;
+  }
+
+  // Default: registrable is last 2 labels.
+  return last2;
+}
 
 function getDomain(url) {
   try {
@@ -58,9 +148,8 @@ function getDomain(url) {
       return hostname;
     }
 
-    // Default: strip to root domain (last two parts)
-    const parts = hostname.split(".");
-    const domain = parts.length >= 2 ? parts.slice(-2).join(".") : hostname;
+    // Default: strip to registrable domain (handles common multi-part TLDs like co.uk)
+    const domain = registrableDomainFromHostname(hostname);
 
     // Check alias map again on the stripped domain
     if (domainAliases[domain]) {
@@ -96,6 +185,7 @@ function saveElapsed() {
     console.log(
       `Tracked ${seconds}s on ${currentSite} (Today total: ${siteData[currentSite]}s) [${todayKey}]`
     );
+    saveTrackingState();
   });
 }
 
@@ -111,6 +201,7 @@ function switchToSite(url) {
   currentSite = domain;
   startTime = Date.now();
   console.log("Now tracking:", domain);
+  saveTrackingState();
 }
 
 function pauseTracking(reason) {
@@ -119,6 +210,7 @@ function pauseTracking(reason) {
   saveElapsed();
   // Keep currentSite so we know what to resume, but null startTime
   startTime = null;
+  saveTrackingState();
 }
 
 function resumeTracking() {
@@ -126,19 +218,20 @@ function resumeTracking() {
   if (startTime) return; // already running
   startTime = Date.now();
   console.log("Tracking resumed on:", currentSite);
+  saveTrackingState();
 }
 
 // ─── Tab events ──────────────────────────────────────────────────────────────
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
-  if (isIdle) return;
+  if (isIdle || !isWindowFocused) return;
   chrome.tabs.get(activeInfo.tabId, (tab) => {
     if (tab && tab.url) switchToSite(tab.url);
   });
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (isIdle) return;
+  if (isIdle || !isWindowFocused) return;
   if (changeInfo.status === "complete" && tab.active && tab.url) {
     switchToSite(tab.url);
   }
@@ -147,40 +240,30 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 // ─── Window focus ─────────────────────────────────────────────────────────────
 // Use a short debounce so rapidly alt-tabbing back doesn't wipe data
 
-// let focusDebounce = null;
-//
-// chrome.windows.onFocusChanged.addListener((windowId) => {
-//   if (windowId === chrome.windows.WINDOW_ID_NONE) {
-//     // Chrome lost focus — wait briefly before pausing in case user alt-tabs back
-//     if (focusDebounce) return; // already pending
-//     focusDebounce = setTimeout(() => {
-//       focusDebounce = null;
-//       pauseTracking("window lost focus");
-//     }, 15000); // 15-second grace period
-//   } else {
-//     // Chrome regained focus — cancel any pending pause
-//     if (focusDebounce) {
-//       clearTimeout(focusDebounce);
-//       focusDebounce = null;
-//     }
-//
-//     if (!isIdle) {
-//       // Re-detect which site we're on
-//       chrome.tabs.query({ active: true, windowId: windowId }, (tabs) => {
-//         if (tabs[0] && tabs[0].url) {
-//           const domain = getDomain(tabs[0].url);
-//           if (domain) {
-//             if (domain !== currentSite) {
-//               // Switched sites while focus was away
-//               currentSite = domain;
-//             }
-//             resumeTracking();
-//           }
-//         }
-//       });
-//     }
-//   }
-// });
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) {
+    isWindowFocused = false;
+    saveTrackingState();
+    // Strict attention: only count when Chrome is focused.
+    pauseTracking("window lost focus");
+  } else {
+    isWindowFocused = true;
+    saveTrackingState();
+
+    if (!isIdle) {
+      // Re-detect which site we're on
+      chrome.tabs.query({ active: true, windowId: windowId }, (tabs) => {
+        if (tabs[0] && tabs[0].url) {
+          const domain = getDomain(tabs[0].url);
+          if (domain) {
+            if (domain !== currentSite) currentSite = domain;
+            resumeTracking();
+          }
+        }
+      });
+    }
+  }
+});
 
 // ─── Idle detection ───────────────────────────────────────────────────────────
 // Requires "idle" permission in manifest.json
@@ -194,16 +277,19 @@ chrome.idle.onStateChanged.addListener((state) => {
     pauseTracking(`user ${state}`);
   } else if (state === "active") {
     isIdle = false;
-    // Resume on the tab that's currently active
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0] && tabs[0].url) {
-        const domain = getDomain(tabs[0].url);
-        if (domain) {
-          if (domain !== currentSite) currentSite = domain;
-          resumeTracking();
+    if (isWindowFocused) {
+      // Resume on the tab that's currently active
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs[0] && tabs[0].url) {
+          const domain = getDomain(tabs[0].url);
+          if (domain) {
+            if (domain !== currentSite) currentSite = domain;
+            resumeTracking();
+          }
         }
-      }
-    });
+      });
+    }
+    saveTrackingState();
   }
 });
 
@@ -212,11 +298,14 @@ chrome.idle.onStateChanged.addListener((state) => {
 function pruneOldDays() {
   // Keep only the last 30 days of data keys to avoid storage bloat
   chrome.storage.local.get(null, (allData) => {
-    const today = getTodayKey();
     const keysToRemove = [];
     for (const key of Object.keys(allData)) {
-      if (!key.startsWith("siteData_")) continue;
-      const datePart = key.replace("siteData_", "");
+      let datePart = null;
+      if (key.startsWith("siteData_")) datePart = key.replace("siteData_", "");
+      else if (key.startsWith("lastSent_")) datePart = key.replace("lastSent_", "");
+      else if (key.startsWith("pendingDelta_")) datePart = key.replace("pendingDelta_", "");
+      else continue;
+
       // Simple string compare works for YYYY-MM-DD
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - 30);
@@ -237,44 +326,88 @@ function pruneOldDays() {
 function sendToServer() {
   const todayKey = getTodayKey();
   const storageKey = `siteData_${todayKey}`;
+  const lastSentKey = `lastSent_${todayKey}`;
+  const pendingDeltaKey = `pendingDelta_${todayKey}`;
 
-  chrome.storage.local.get([storageKey, "pendingData"], (result) => {
+  chrome.storage.local.get(
+    [storageKey, lastSentKey, pendingDeltaKey, "apiKey", "serverUrl"],
+    (result) => {
     const todayData = result[storageKey] || {};
-    const pending = result.pendingData || {}; // data from previous failed sends
+    const lastSent = result[lastSentKey] || {};
+    const pendingDelta = result[pendingDeltaKey] || {};
+    const apiKey = result.apiKey || null;
+    const baseUrl =
+      (result.serverUrl && String(result.serverUrl).trim().replace(/\/+$/, "")) ||
+      "https://attention-auditor-production.up.railway.app";
+    const trackUrl = `${baseUrl}/api/track`;
 
-    // Merge pending + today
-    const merged = { ...pending };
-    for (const [domain, secs] of Object.entries(todayData)) {
-      merged[domain] = (merged[domain] || 0) + secs;
+    // Compute delta since last successful send, then merge any previously-failed delta.
+    const delta = {};
+    for (const [domain, total] of Object.entries(todayData)) {
+      const last = lastSent[domain] || 0;
+      const diff = total - last;
+      if (diff > 0) delta[domain] = diff;
+    }
+    const mergedToSend = { ...pendingDelta };
+    for (const [domain, secs] of Object.entries(delta)) {
+      mergedToSend[domain] = (mergedToSend[domain] || 0) + secs;
     }
 
-    const sites = Object.entries(merged)
+    const sites = Object.entries(mergedToSend)
       .filter(([, secs]) => secs > 0)
       .map(([domain, seconds]) => ({ domain, seconds }));
 
     if (sites.length === 0) return;
 
-    fetch("https://attention-auditor-production.up.railway.app/api/track", {
+    chrome.storage.local.set({
+      lastSyncUrl: trackUrl,
+      lastSyncAttemptAt: Date.now(),
+    });
+
+    fetch(trackUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey ? { "X-ATTENTION-AUDITOR-KEY": apiKey } : {}),
+      },
       body: JSON.stringify({ sites, date: todayKey }),
     })
-      .then((r) => r.json())
+      .then(async (r) => {
+        let payload = null;
+        try {
+          payload = await r.json();
+        } catch {
+          payload = null;
+        }
+        if (!r.ok) {
+          const msg =
+            (payload && (payload.error || payload.message)) ||
+            `HTTP ${r.status}`;
+          throw new Error(msg);
+        }
+        return payload;
+      })
       .then((data) => {
         console.log("Sent to server:", data);
-        // Only clear today's local data on success; wipe pending too
+        // Keep local totals (so popup is never empty). Only advance lastSent + clear pending delta.
         chrome.storage.local.set({
-          [storageKey]: {},
-          pendingData: {},
+          [lastSentKey]: todayData,
+          [pendingDeltaKey]: {},
+          lastSyncAt: Date.now(),
+          lastSyncError: "",
         });
         pruneOldDays();
       })
       .catch((err) => {
         console.log("Server not available, will retry:", err.message);
-        // Save what we tried to send as pendingData so it isn't lost
-        chrome.storage.local.set({ pendingData: merged, [storageKey]: {} });
+        // Save the delta we tried to send so it isn't lost (but keep accumulating todayData normally).
+        chrome.storage.local.set({
+          [pendingDeltaKey]: mergedToSend,
+          lastSyncError: String(err?.message || err || "Unknown error"),
+        });
       });
-  });
+    }
+  );
 }
 
 // ─── Alarms ───────────────────────────────────────────────────────────────────
@@ -283,20 +416,51 @@ chrome.alarms.create("sendData", { periodInMinutes: 1 }); // single create
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "sendData") {
-    // Save current in-progress session before sending
-    saveElapsed();
-    if (startTime) startTime = Date.now(); // reset window so we don't double-count
-    console.log("Alarm fired, sending data...");
-    sendToServer();
+    restoreTrackingState(() => {
+      // Strict attention: only count while focused + active (not idle).
+      if (!isIdle && isWindowFocused) {
+        saveElapsed();
+        if (startTime) startTime = Date.now(); // reset window so we don't double-count
+      }
+      saveTrackingState();
+      console.log("Alarm fired, sending data...");
+      sendToServer();
+    });
   }
 });
 
+chrome.runtime.onSuspend.addListener(() => {
+  try {
+    saveElapsed();
+  } finally {
+    saveTrackingState();
+  }
+});
+
+function initTrackingFromActiveTab() {
+  restoreTrackingState(() => {
+    if (isIdle || !isWindowFocused) return;
+    if (currentSite && startTime) return;
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+      if (tabs[0] && tabs[0].url) {
+        const domain = getDomain(tabs[0].url);
+        if (!domain) return;
+        currentSite = domain;
+        startTime = Date.now();
+        saveTrackingState();
+      }
+    });
+  });
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log("Extension installed/refreshed");
+  initTrackingFromActiveTab();
   sendToServer();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   console.log("Browser started");
+  initTrackingFromActiveTab();
   sendToServer();
 });

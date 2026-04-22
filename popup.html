@@ -18,9 +18,11 @@
       padding-bottom: 12px;
       border-bottom: 2px solid #16213e;
     }
-    .header img {
+    .header .logo {
       width: 28px;
       height: 28px;
+      border-radius: 6px;
+      flex: 0 0 auto;
     }
     h1 {
       font-size: 18px;
@@ -83,11 +85,88 @@
       color: #2cb67d;
       font-weight: bold;
     }
+    .status {
+      margin-top: 10px;
+      padding: 10px 12px;
+      background-color: rgba(22, 33, 62, 0.6);
+      border: 1px solid rgba(22, 33, 62, 0.9);
+      border-radius: 8px;
+      font-size: 11px;
+      color: #9aa0aa;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .status .label {
+      color: #666;
+      letter-spacing: 0.02em;
+    }
+    .status .value {
+      color: #e0e0e0;
+      font-weight: 600;
+      word-break: break-word;
+    }
+    .settings {
+      margin-top: 10px;
+      padding: 10px 12px;
+      background-color: rgba(22, 33, 62, 0.6);
+      border: 1px solid rgba(22, 33, 62, 0.9);
+      border-radius: 8px;
+      font-size: 11px;
+      color: #9aa0aa;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .settings .row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .settings label {
+      color: #666;
+      font-size: 10px;
+      letter-spacing: 0.02em;
+    }
+    .settings input {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 12px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(0,0,0,0.25);
+      color: #e0e0e0;
+      outline: none;
+    }
+    .settings input::placeholder {
+      color: rgba(224,224,224,0.35);
+    }
+    .settings .actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .btn {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 11px;
+      padding: 7px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(127, 90, 240, 0.16);
+      color: #e0e0e0;
+      cursor: pointer;
+    }
+    .btn:hover { background: rgba(127, 90, 240, 0.24); }
+    .hint {
+      font-size: 10px;
+      color: #666;
+      line-height: 1.3;
+    }
   </style>
 </head>
 <body>
   <div class="header">
-    <img src="icon48.png" alt="logo">
+    <img class="logo" src="icon.svg" alt="Attention Auditor logo" />
     <div>
       <h1>Attention Auditor</h1>
       <div class="subtitle">watching you watch the internet</div>
@@ -97,6 +176,30 @@
   <div class="footer">
     <div class="total">Total tracked: <span id="totalTime">0s</span></div>
   </div>
-  <script src="extension/popup.js"></script>
+  <div class="status" id="statusBox">
+    <div><span class="label">Focus</span>: <span class="value" id="focusStatus">--</span></div>
+    <div><span class="label">Idle</span>: <span class="value" id="idleStatus">--</span></div>
+    <div><span class="label">Tracking</span>: <span class="value" id="trackingStatus">--</span></div>
+  </div>
+  <div class="settings">
+    <div class="row">
+      <label for="serverUrl">Server URL (for sync)</label>
+      <input id="serverUrl" placeholder="https://attention-auditor-production.up.railway.app" />
+    </div>
+    <div class="row">
+      <label for="apiKey">API key (optional)</label>
+      <input id="apiKey" placeholder="Set only if backend requires it" />
+      <div class="hint">Backend expects header <span style="color:#888">X-ATTENTION-AUDITOR-KEY</span> when <span style="color:#888">ATTENTION_AUDITOR_API_KEY</span> is set.</div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="saveSettings">Save</button>
+    </div>
+  </div>
+  <div class="status" id="syncBox">
+    <div><span class="label">Last sync</span>: <span class="value" id="lastSyncAt">--</span></div>
+    <div><span class="label">Sync URL</span>: <span class="value" id="lastSyncUrl">--</span></div>
+    <div><span class="label">Last error</span>: <span class="value" id="lastSyncError">--</span></div>
+  </div>
+  <script src="popup.js"></script>
 </body>
 </html>

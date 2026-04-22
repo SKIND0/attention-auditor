@@ -2,20 +2,178 @@ from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from openai import OpenAI
 import mysql.connector
-from datetime import date
+from datetime import date, datetime
+from functools import wraps
+import time
+from collections import deque
 
 app = Flask(__name__)
-CORS(app)
 
 import os
+
+def _parse_origins(value: str):
+    return [o.strip() for o in (value or "").split(",") if o.strip()]
+
+IS_DEBUG = os.environ.get("FLASK_DEBUG") == "1"
+
+# CORS: allow only known dashboard origins (comma-separated).
+# Note: CORS is NOT authentication; it only controls which browser origins can read responses.
+cors_origins = _parse_origins(
+    os.environ.get(
+        "CORS_ORIGINS",
+        "https://attention-auditor-production.up.railway.app,http://127.0.0.1:5000,http://localhost:5000",
+    )
+)
+CORS(app, resources={r"/api/*": {"origins": cors_origins}})
+
+# API key auth (optional): if ATTENTION_AUDITOR_API_KEY is set, protected endpoints require it.
+API_KEY = os.environ.get("ATTENTION_AUDITOR_API_KEY")
+
+AUTO_CATEGORIZE_ON_TRACK = os.environ.get("AUTO_CATEGORIZE_ON_TRACK") == "1"
+MAX_NEW_DOMAINS_TO_CATEGORIZE_PER_TRACK = int(os.environ.get("MAX_NEW_DOMAINS_TO_CATEGORIZE_PER_TRACK", "5"))
+
+FEEDBACK_RATE_LIMIT_PER_MINUTE = int(os.environ.get("FEEDBACK_RATE_LIMIT_PER_MINUTE", "6"))
+CATEGORIZE_ALL_RATE_LIMIT_PER_HOUR = int(os.environ.get("CATEGORIZE_ALL_RATE_LIMIT_PER_HOUR", "3"))
+
+RATE_LIMIT_STORAGE = os.environ.get("RATE_LIMIT_STORAGE", "mysql").lower()  # mysql|memory
+RATE_LIMIT_TABLE = os.environ.get("RATE_LIMIT_TABLE", "rate_limits")
+
+_rate_state = {}  # memory fallback
+
+def _client_ip():
+    # Railway/most proxies: X-Forwarded-For is present. Take the first IP.
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+def _ensure_rate_limit_table():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {RATE_LIMIT_TABLE} (
+            bucket_key VARCHAR(255) PRIMARY KEY,
+            window_id BIGINT NOT NULL,
+            count INT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_window_id (window_id)
+        )
+        """
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+_rate_table_ready = False
+
+def rate_limit(limit: int, window_seconds: int, key_prefix: str):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            ip = _client_ip()
+            now = time.time()
+
+            if RATE_LIMIT_STORAGE == "mysql":
+                global _rate_table_ready
+                if not _rate_table_ready:
+                    _ensure_rate_limit_table()
+                    _rate_table_ready = True
+
+                window_id = int(now // window_seconds)
+                bucket_key = f"{key_prefix}:{ip}:{window_id}"
+
+                conn = get_db()
+                cur = conn.cursor()
+                # Atomic increment per window bucket
+                cur.execute(
+                    f"""
+                    INSERT INTO {RATE_LIMIT_TABLE} (bucket_key, window_id, count)
+                    VALUES (%s, %s, 1)
+                    ON DUPLICATE KEY UPDATE count = count + 1
+                    """,
+                    (bucket_key, window_id),
+                )
+                conn.commit()
+
+                cur.execute(
+                    f"SELECT count FROM {RATE_LIMIT_TABLE} WHERE bucket_key = %s",
+                    (bucket_key,),
+                )
+                row = cur.fetchone()
+                cur.close()
+                conn.close()
+
+                count = int(row[0]) if row else 1
+                if count > limit:
+                    # Retry after until next window
+                    next_window_start = (window_id + 1) * window_seconds
+                    retry_after = int(max(1, next_window_start - now))
+                    return (
+                        jsonify({"error": "Rate limit exceeded", "retry_after_seconds": retry_after}),
+                        429,
+                        {"Retry-After": str(retry_after)},
+                    )
+
+                return fn(*args, **kwargs)
+
+            # Memory fallback (non-persistent)
+            key = f"{key_prefix}:{ip}"
+            dq = _rate_state.get(key)
+            if dq is None:
+                dq = deque()
+                _rate_state[key] = dq
+
+            cutoff = now - window_seconds
+            while dq and dq[0] < cutoff:
+                dq.popleft()
+
+            if len(dq) >= limit:
+                retry_after = int(max(1, (dq[0] + window_seconds) - now))
+                return (
+                    jsonify({"error": "Rate limit exceeded", "retry_after_seconds": retry_after}),
+                    429,
+                    {"Retry-After": str(retry_after)},
+                )
+
+            dq.append(now)
+            return fn(*args, **kwargs)
+        return wrapper
+    return decorator
+
+def require_api_key(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not API_KEY:
+            return fn(*args, **kwargs)
+
+        header_key = request.headers.get("X-ATTENTION-AUDITOR-KEY")
+        auth = request.headers.get("Authorization", "")
+        bearer = auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else None
+        provided = header_key or bearer
+
+        if provided != API_KEY:
+            return jsonify({"error": "Unauthorized"}), 401
+        return fn(*args, **kwargs)
+    return wrapper
 
 db_host = os.environ.get("MYSQLHOST") or os.environ.get("MYSQL_HOST", "localhost")
 db_port = int(os.environ.get("MYSQLPORT") or os.environ.get("MYSQL_PORT", 3306))
 db_user = os.environ.get("MYSQLUSER") or os.environ.get("MYSQL_USER", "root")
-db_password = os.environ.get("MYSQLPASSWORD") or os.environ.get("MYSQL_PASSWORD") or input("Enter MySQL password: ")
+db_password = os.environ.get("MYSQLPASSWORD") or os.environ.get("MYSQL_PASSWORD")
+if not db_password:
+    if IS_DEBUG:
+        db_password = input("Enter MySQL password: ")
+    else:
+        raise RuntimeError("Missing MySQL password. Set MYSQLPASSWORD or MYSQL_PASSWORD.")
 db_name = os.environ.get("MYSQLDATABASE") or os.environ.get("MYSQL_DATABASE", "attention_auditor")
 
-openai_api_key = os.environ.get("OPENAI_API_KEY") or input("Enter OpenAI API key: ")
+openai_api_key = os.environ.get("OPENAI_API_KEY")
+if not openai_api_key:
+    if IS_DEBUG:
+        openai_api_key = input("Enter OpenAI API key: ")
+    else:
+        raise RuntimeError("Missing OpenAI API key. Set OPENAI_API_KEY.")
 openai_client = OpenAI(api_key=openai_api_key)
 
 def get_db():
@@ -63,6 +221,7 @@ def categorize_domain(domain):
 
 
 @app.route("/api/track", methods=["POST"])
+@require_api_key
 def track():
     data = request.get_json()
     if not data or "sites" not in data:
@@ -81,9 +240,10 @@ def track():
         domain = site.get("domain")
         seconds = site.get("seconds", 0)
         if domain and seconds > 0:
+            received_at = datetime.now()
             cursor.execute(
                 "INSERT INTO browsing_data (domain, seconds_spent, recorded_at) VALUES (%s, %s, %s)",
-                (domain, seconds, record_date)
+                (domain, seconds, received_at)
             )
             cursor.execute(
                 """INSERT INTO daily_summary (domain, total_seconds, visit_date)
@@ -96,19 +256,44 @@ def track():
     cursor.close()
     conn.close()
 
-    # Auto-categorize any new domains in the background
-    for site in data["sites"]:
-        domain = site.get("domain")
-        if domain:
-            try:
-                categorize_domain(domain)
-            except Exception as e:
-                print(f"Could not categorize {domain}: {e}")
+    # Avoid accidental OpenAI/cost work from normal tracking.
+    # If explicitly enabled, only categorize domains that are truly uncategorized (capped).
+    if AUTO_CATEGORIZE_ON_TRACK:
+        incoming_domains = []
+        for site in data["sites"]:
+            d = (site.get("domain") or "").strip()
+            if d:
+                incoming_domains.append(d)
+        # De-dup preserving order
+        seen = set()
+        incoming_domains = [d for d in incoming_domains if not (d in seen or seen.add(d))]
+
+        if incoming_domains:
+            conn = get_db()
+            cur = conn.cursor()
+            placeholders = ",".join(["%s"] * len(incoming_domains))
+            cur.execute(
+                f"SELECT domain FROM site_categories WHERE domain IN ({placeholders})",
+                tuple(incoming_domains),
+            )
+            categorized = {row[0] for row in cur.fetchall()}
+            cur.close()
+            conn.close()
+
+            to_categorize = [d for d in incoming_domains if d not in categorized]
+            to_categorize = to_categorize[:MAX_NEW_DOMAINS_TO_CATEGORIZE_PER_TRACK]
+
+            for domain in to_categorize:
+                try:
+                    categorize_domain(domain)
+                except Exception as e:
+                    print(f"Could not categorize {domain}: {e}")
 
     return jsonify({"status": "ok"}), 200
 
 
 @app.route("/api/stats", methods=["GET"])
+@require_api_key
 def stats():
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
@@ -144,6 +329,7 @@ def dashboard():
 
 
 @app.route("/api/stats/weekly", methods=["GET"])
+@require_api_key
 def weekly_stats():
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
@@ -183,6 +369,7 @@ def weekly_stats():
 
 
 @app.route("/api/categories", methods=["GET"])
+@require_api_key
 def get_categories():
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
@@ -194,6 +381,8 @@ def get_categories():
 
 
 @app.route("/api/categorize-all", methods=["POST"])
+@require_api_key
+@rate_limit(limit=CATEGORIZE_ALL_RATE_LIMIT_PER_HOUR, window_seconds=60 * 60, key_prefix="categorize_all")
 def categorize_all():
     """Find all domains in browsing data that aren't categorized yet and categorize them."""
     conn = get_db()
@@ -215,6 +404,7 @@ def categorize_all():
     return jsonify({"categorized": results, "count": len(results)}), 200
 
 @app.route("/api/categories/update", methods=["POST"])
+@require_api_key
 def update_category():
     data = request.get_json()
     domain = data.get("domain")
@@ -237,6 +427,8 @@ def update_category():
     return jsonify({"domain": domain, "category": category, "source": "user"}), 200
 
 @app.route("/api/feedback", methods=["GET"])
+@require_api_key
+@rate_limit(limit=FEEDBACK_RATE_LIMIT_PER_MINUTE, window_seconds=60, key_prefix="feedback")
 def feedback():
     personality = request.args.get("personality", "coach")
 
@@ -295,4 +487,6 @@ def feedback():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    debug = os.environ.get("FLASK_DEBUG") == "1"
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=debug, port=port)

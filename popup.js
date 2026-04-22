@@ -1,5 +1,8 @@
 chrome.runtime.sendMessage({ type: "flushSession" });
 
+const DEFAULT_SERVER_URL =
+  "https://attention-auditor-production.up.railway.app";
+
 function formatTime(seconds) {
   if (seconds < 60) return seconds + "s";
   let minutes = Math.floor(seconds / 60);
@@ -43,24 +46,119 @@ function renderSites(sites) {
   document.getElementById("totalTime").textContent = formatTime(totalSeconds);
 }
 
-// Always load local data — it's always fresh
-setTimeout(() => {
+function renderStatus(trackingState) {
+  const focusEl = document.getElementById("focusStatus");
+  const idleEl = document.getElementById("idleStatus");
+  const trackingEl = document.getElementById("trackingStatus");
+
+  if (!focusEl || !idleEl || !trackingEl) return;
+
+  const isFocused = trackingState?.isWindowFocused;
+  const isIdle = trackingState?.isIdle;
+  const currentSite = trackingState?.currentSite;
+  const startTime = trackingState?.startTime;
+
+  focusEl.textContent = isFocused === undefined ? "--" : isFocused ? "Focused" : "Unfocused";
+  idleEl.textContent = isIdle === undefined ? "--" : isIdle ? "Idle" : "Active";
+
+  if (!currentSite) {
+    trackingEl.textContent = "--";
+    return;
+  }
+
+  const running = Boolean(startTime);
+  trackingEl.textContent = running ? `${currentSite} (running)` : `${currentSite} (paused)`;
+}
+
+function formatDateTime(ms) {
+  if (!ms) return "--";
+  const d = new Date(Number(ms));
+  if (Number.isNaN(d.getTime())) return "--";
+  return d.toLocaleString();
+}
+
+function renderSync(sync) {
+  const atEl = document.getElementById("lastSyncAt");
+  const urlEl = document.getElementById("lastSyncUrl");
+  const errEl = document.getElementById("lastSyncError");
+  if (!atEl || !urlEl || !errEl) return;
+
+  atEl.textContent = sync?.lastSyncAt ? formatDateTime(sync.lastSyncAt) : "--";
+  urlEl.textContent = sync?.lastSyncUrl || "--";
+  errEl.textContent = sync?.lastSyncError ? sync.lastSyncError : "None";
+}
+
+function normalizeServerUrl(input) {
+  const trimmed = String(input || "").trim();
+  if (!trimmed) return "";
+  return trimmed.replace(/\/+$/, "");
+}
+
+function initSettingsUI() {
+  const serverUrlInput = document.getElementById("serverUrl");
+  const apiKeyInput = document.getElementById("apiKey");
+  const saveBtn = document.getElementById("saveSettings");
+
+  if (!serverUrlInput || !apiKeyInput || !saveBtn) return;
+
+  chrome.storage.local.get(["serverUrl", "apiKey"], (result) => {
+    serverUrlInput.value = result.serverUrl || "";
+    apiKeyInput.value = result.apiKey || "";
+  });
+
+  saveBtn.addEventListener("click", () => {
+    const serverUrl = normalizeServerUrl(serverUrlInput.value) || "";
+    const apiKey = String(apiKeyInput.value || "").trim();
+
+    // Save blank to "unset" (background falls back to default)
+    chrome.storage.local.set({ serverUrl, apiKey }, () => {
+      saveBtn.textContent = "Saved";
+      setTimeout(() => (saveBtn.textContent = "Save"), 800);
+    });
+  });
+}
+
+function loadAndRenderToday() {
   const todayKey = getTodayKey();
   const storageKey = `siteData_${todayKey}`;
 
-  chrome.storage.local.get([storageKey, "pendingData"], (result) => {
+  chrome.storage.local.get(
+    [storageKey, "trackingState", "lastSyncAt", "lastSyncUrl", "lastSyncError"],
+    (result) => {
     const todayData = result[storageKey] || {};
-    const pending = result.pendingData || {};
+    renderStatus(result.trackingState);
+    renderSync({
+      lastSyncAt: result.lastSyncAt,
+      lastSyncUrl: result.lastSyncUrl,
+      lastSyncError: result.lastSyncError,
+    });
 
-    const merged = { ...pending };
-    for (const [domain, secs] of Object.entries(todayData)) {
-      merged[domain] = (merged[domain] || 0) + secs;
-    }
-
-    const sites = Object.entries(merged)
-      .filter(([domain]) => domain !== "0.1" && domain !== "localhost")
+    const sites = Object.entries(todayData)
+      .filter(
+        ([domain]) =>
+          domain !== "0.1" && domain !== "localhost" && domain !== "localhost:5000"
+      )
       .map(([domain, total_seconds]) => ({ domain, total_seconds }));
 
     renderSites(sites);
   });
-}, 100);
+}
+
+// Render immediately on open
+loadAndRenderToday();
+initSettingsUI();
+
+// Live update while popup is open
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local") return;
+  const storageKey = `siteData_${getTodayKey()}`;
+  if (
+    changes[storageKey] ||
+    changes.trackingState ||
+    changes.lastSyncAt ||
+    changes.lastSyncUrl ||
+    changes.lastSyncError
+  ) {
+    loadAndRenderToday();
+  }
+});
