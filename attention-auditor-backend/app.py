@@ -486,6 +486,176 @@ def feedback():
     return jsonify({"feedback": feedback_text, "personality": personality}), 200
 
 
+@app.route("/api/anomalies", methods=["GET"])
+@require_api_key
+def anomalies():
+    conn = get_db()
+    cursor = conn.cursor(dictionary=True)
+
+    today_str = request.args.get("date", str(date.today()))
+
+    # Get today's data
+    cursor.execute(
+        """SELECT d.domain, d.total_seconds, COALESCE(c.category, 'neutral') as category
+           FROM daily_summary d
+           LEFT JOIN site_categories c ON d.domain = c.domain
+           WHERE d.visit_date = %s
+           ORDER BY d.total_seconds DESC""",
+        (today_str,)
+    )
+    today = cursor.fetchall()
+
+    # Get 7-day averages (excluding today)
+    cursor.execute(
+        """SELECT d.domain, 
+                  ROUND(AVG(d.total_seconds)) as avg_seconds,
+                  COUNT(DISTINCT d.visit_date) as days_seen
+           FROM daily_summary d
+           WHERE d.visit_date >= DATE_SUB(%s, INTERVAL 7 DAY)
+             AND d.visit_date < %s
+           GROUP BY d.domain""",
+        (today_str, today_str)
+    )
+    averages = {row["domain"]: row for row in cursor.fetchall()}
+
+    # Get category averages
+    cursor.execute(
+        """SELECT COALESCE(c.category, 'neutral') as category,
+                  ROUND(AVG(daily_total)) as avg_seconds
+           FROM (
+               SELECT d.visit_date, COALESCE(c.category, 'neutral') as category,
+                      SUM(d.total_seconds) as daily_total
+               FROM daily_summary d
+               LEFT JOIN site_categories c ON d.domain = c.domain
+               WHERE d.visit_date >= DATE_SUB(%s, INTERVAL 7 DAY)
+                 AND d.visit_date < %s
+               GROUP BY d.visit_date, c.category
+           ) sub
+           LEFT JOIN site_categories c ON 1=0
+           GROUP BY category""",
+        (today_str, today_str)
+    )
+    cat_avgs = {row["category"]: int(row["avg_seconds"]) for row in cursor.fetchall()}
+
+    cursor.close()
+    conn.close()
+
+    # Find anomalies
+    flags = []
+
+    productive_today = sum(s["total_seconds"] for s in today if s["category"] == "productive")
+    distracting_today = sum(s["total_seconds"] for s in today if s["category"] == "distracting")
+
+    prod_avg = cat_avgs.get("productive", 0)
+    dist_avg = cat_avgs.get("distracting", 0)
+
+    if prod_avg > 0 and productive_today > prod_avg * 1.5:
+        flags.append({"type": "positive", "message": f"Productive time is {productive_today // 60}min, {round(productive_today / prod_avg, 1)}x your average"})
+    if prod_avg > 0 and productive_today < prod_avg * 0.5:
+        flags.append({"type": "warning", "message": f"Productive time is only {productive_today // 60}min, well below your {prod_avg // 60}min average"})
+    if dist_avg > 0 and distracting_today > dist_avg * 2:
+        flags.append({"type": "alert", "message": f"Distracting time is {distracting_today // 60}min, {round(distracting_today / dist_avg, 1)}x your average"})
+
+    for site in today:
+        domain = site["domain"]
+        seconds = site["total_seconds"]
+        avg_data = averages.get(domain)
+        if avg_data and avg_data["avg_seconds"] > 60:
+            ratio = seconds / avg_data["avg_seconds"]
+            if ratio >= 3:
+                flags.append({"type": "alert", "message": f"{domain}: {seconds // 60}min today vs {avg_data['avg_seconds'] // 60}min average ({round(ratio, 1)}x)"})
+            elif ratio >= 2:
+                flags.append({"type": "warning", "message": f"{domain}: {seconds // 60}min today vs {avg_data['avg_seconds'] // 60}min average ({round(ratio, 1)}x)"})
+
+    # New sites never seen before
+    for site in today:
+        if site["domain"] not in averages:
+            if site["total_seconds"] > 120:
+                flags.append({"type": "info", "message": f"New site: {site['domain']} ({site['total_seconds'] // 60}min)"})
+
+    return jsonify({
+        "flags": flags,
+        "productive_today": productive_today,
+        "distracting_today": distracting_today,
+        "productive_avg": prod_avg,
+        "distracting_avg": dist_avg
+    }), 200
+
+@app.route("/api/weekly-report", methods=["GET"])
+@require_api_key
+@rate_limit(limit=3, window_seconds=60 * 60, key_prefix="weekly_report")
+def weekly_report():
+    conn = get_db()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute(
+        """SELECT d.visit_date, d.domain, d.total_seconds, COALESCE(c.category, 'neutral') as category
+           FROM daily_summary d
+           LEFT JOIN site_categories c ON d.domain = c.domain
+           WHERE d.visit_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+           ORDER BY d.visit_date ASC, d.total_seconds DESC"""
+    )
+    rows = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    if not rows:
+        return jsonify({"report": "No data from the past week to analyze."}), 200
+
+    # Build summary for AI
+    days = {}
+    for row in rows:
+        day = str(row["visit_date"])
+        if day not in days:
+            days[day] = {"productive": 0, "distracting": 0, "neutral": 0, "sites": []}
+        days[day][row["category"]] += row["total_seconds"]
+        days[day]["sites"].append(f"{row['domain']} ({row['total_seconds'] // 60}min, {row['category']})")
+
+    summary = "Weekly browsing data:\n\n"
+    total_productive = 0
+    total_distracting = 0
+    best_day = None
+    best_ratio = -1
+    worst_day = None
+    worst_ratio = float('inf')
+
+    for day, data in sorted(days.items()):
+        prod = data["productive"]
+        dist = data["distracting"]
+        total_productive += prod
+        total_distracting += dist
+        total = prod + dist + data["neutral"]
+
+        ratio = prod / max(dist, 1)
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_day = day
+        if ratio < worst_ratio:
+            worst_ratio = ratio
+            worst_day = day
+
+        summary += f"{day}: productive={prod // 60}min, distracting={dist // 60}min, neutral={data['neutral'] // 60}min\n"
+        summary += f"  Top sites: {', '.join(data['sites'][:5])}\n\n"
+
+    summary += f"\nBest day (highest productive ratio): {best_day}\n"
+    summary += f"Worst day (lowest productive ratio): {worst_day}\n"
+    summary += f"Total productive: {total_productive // 60}min\n"
+    summary += f"Total distracting: {total_distracting // 60}min\n"
+
+    response = openai_client.chat.completions.create(
+        model="gpt-4o-mini",
+        max_tokens=400,
+        messages=[
+            {"role": "system", "content": "You are a productivity analyst writing a weekly browsing report. Write it like a brief newspaper article with a headline. Include: the biggest win of the week, the biggest time drain, the best and worst days with context, and 2 specific experiments to try next week. Be concise, data-driven, and reference actual sites and times. Keep a professional but slightly witty tone."},
+            {"role": "user", "content": summary}
+        ]
+    )
+
+    report_text = response.choices[0].message.content.strip()
+
+    return jsonify({"report": report_text}), 200
+
 if __name__ == "__main__":
     debug = os.environ.get("FLASK_DEBUG") == "1"
     port = int(os.environ.get("PORT", 5000))
