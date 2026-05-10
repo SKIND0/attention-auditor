@@ -184,12 +184,13 @@
   <div class="settings">
     <div class="row">
       <label for="serverUrl">Server URL (for sync)</label>
-      <input id="serverUrl" placeholder="https://attention-auditor-production.up.railway.app" />
+      <input id="serverUrl" placeholder="Leave blank for default Railway URL" />
+      <div class="hint">Sites and time above are always from <strong>this browser</strong> (saved locally). Sync uploads them to the server when it is reachable.</div>
     </div>
     <div class="row">
-      <label for="apiKey">API key (optional)</label>
-      <input id="apiKey" placeholder="Set only if backend requires it" />
-      <div class="hint">Backend expects header <span style="color:#888">X-ATTENTION-AUDITOR-KEY</span> when <span style="color:#888">ATTENTION_AUDITOR_API_KEY</span> is set.</div>
+      <label for="apiKey">Sync API key (only if your server uses one)</label>
+      <input id="apiKey" placeholder="Same value as ATTENTION_AUDITOR_API_KEY on Railway" />
+      <div class="hint">Required for upload only when the backend sets <span style="color:#888">ATTENTION_AUDITOR_API_KEY</span>. The web dashboard does not need a key. Leave blank if your server has no API key.</div>
     </div>
     <div class="actions">
       <button class="btn" id="saveSettings">Save</button>

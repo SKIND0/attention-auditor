@@ -26,7 +26,8 @@ cors_origins = _parse_origins(
 )
 CORS(app, resources={r"/api/*": {"origins": cors_origins}})
 
-# API key auth (optional): if ATTENTION_AUDITOR_API_KEY is set, protected endpoints require it.
+# API key auth (optional): if ATTENTION_AUDITOR_API_KEY is set:
+# - Extension POST endpoints always require this key (browser dashboard uses same-origin trust for GETs).
 API_KEY = os.environ.get("ATTENTION_AUDITOR_API_KEY")
 
 AUTO_CATEGORIZE_ON_TRACK = os.environ.get("AUTO_CATEGORIZE_ON_TRACK") == "1"
@@ -141,20 +142,76 @@ def rate_limit(limit: int, window_seconds: int, key_prefix: str):
         return wrapper
     return decorator
 
-def require_api_key(fn):
+def _provided_api_key():
+    header_key = request.headers.get("X-ATTENTION-AUDITOR-KEY")
+    auth = request.headers.get("Authorization", "")
+    bearer = auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else None
+    return header_key or bearer
+
+
+def _api_key_matches():
+    if not API_KEY:
+        return True
+    return _provided_api_key() == API_KEY
+
+
+def _dashboard_browser_allowed():
+    """Allow GET /api/* reads from the hosted dashboard without pasting a key (same-origin)."""
+    if not API_KEY:
+        return True
+    origin = (request.headers.get("Origin") or "").strip().rstrip("/")
+    referer = (request.headers.get("Referer") or "").strip()
+
+    allowed = set(_parse_origins(os.environ.get("DASHBOARD_ORIGINS", "")))
+    allowed.update(o for o in cors_origins if o)
+    allowed.add(request.host_url.rstrip("/"))
+
+    def matches_any(url):
+        if not url:
+            return False
+        u = url.rstrip("/")
+        for base in allowed:
+            if not base:
+                continue
+            b = base.rstrip("/")
+            if u == b or u.startswith(b + "/"):
+                return True
+        return False
+
+    if origin and matches_any(origin):
+        return True
+    if referer and matches_any(referer):
+        return True
+    return False
+
+
+def require_extension_api_key(fn):
+    """POST/data ingestion and mutations — extension must send ATTENTION_AUDITOR_API_KEY when the server sets it."""
+
     @wraps(fn)
     def wrapper(*args, **kwargs):
         if not API_KEY:
             return fn(*args, **kwargs)
+        if _api_key_matches():
+            return fn(*args, **kwargs)
+        return jsonify({"error": "Unauthorized", "hint": "Extension: set API key in the popup settings."}), 401
 
-        header_key = request.headers.get("X-ATTENTION-AUDITOR-KEY")
-        auth = request.headers.get("Authorization", "")
-        bearer = auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else None
-        provided = header_key or bearer
+    return wrapper
 
-        if provided != API_KEY:
-            return jsonify({"error": "Unauthorized"}), 401
-        return fn(*args, **kwargs)
+
+def require_dashboard_or_api_key(fn):
+    """Public reads from your dashboard page (same origin), or any caller with the shared API key."""
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not API_KEY:
+            return fn(*args, **kwargs)
+        if _api_key_matches():
+            return fn(*args, **kwargs)
+        if _dashboard_browser_allowed():
+            return fn(*args, **kwargs)
+        return jsonify({"error": "Unauthorized"}), 401
+
     return wrapper
 
 db_host = os.environ.get("MYSQLHOST") or os.environ.get("MYSQL_HOST", "localhost")
@@ -221,7 +278,7 @@ def categorize_domain(domain):
 
 
 @app.route("/api/track", methods=["POST"])
-@require_api_key
+@require_extension_api_key
 def track():
     data = request.get_json()
     if not data or "sites" not in data:
@@ -293,7 +350,7 @@ def track():
 
 
 @app.route("/api/stats", methods=["GET"])
-@require_api_key
+@require_dashboard_or_api_key
 def stats():
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
@@ -329,7 +386,7 @@ def dashboard():
 
 
 @app.route("/api/stats/weekly", methods=["GET"])
-@require_api_key
+@require_dashboard_or_api_key
 def weekly_stats():
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
@@ -369,7 +426,7 @@ def weekly_stats():
 
 
 @app.route("/api/categories", methods=["GET"])
-@require_api_key
+@require_dashboard_or_api_key
 def get_categories():
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
@@ -381,7 +438,7 @@ def get_categories():
 
 
 @app.route("/api/categorize-all", methods=["POST"])
-@require_api_key
+@require_extension_api_key
 @rate_limit(limit=CATEGORIZE_ALL_RATE_LIMIT_PER_HOUR, window_seconds=60 * 60, key_prefix="categorize_all")
 def categorize_all():
     """Find all domains in browsing data that aren't categorized yet and categorize them."""
@@ -404,7 +461,7 @@ def categorize_all():
     return jsonify({"categorized": results, "count": len(results)}), 200
 
 @app.route("/api/categories/update", methods=["POST"])
-@require_api_key
+@require_extension_api_key
 def update_category():
     data = request.get_json()
     domain = data.get("domain")
@@ -427,7 +484,7 @@ def update_category():
     return jsonify({"domain": domain, "category": category, "source": "user"}), 200
 
 @app.route("/api/feedback", methods=["GET"])
-@require_api_key
+@require_dashboard_or_api_key
 @rate_limit(limit=FEEDBACK_RATE_LIMIT_PER_MINUTE, window_seconds=60, key_prefix="feedback")
 def feedback():
     personality = request.args.get("personality", "coach")
@@ -487,7 +544,7 @@ def feedback():
 
 
 @app.route("/api/anomalies", methods=["GET"])
-@require_api_key
+@require_dashboard_or_api_key
 def anomalies():
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
@@ -582,7 +639,7 @@ def anomalies():
     }), 200
 
 @app.route("/api/weekly-report", methods=["GET"])
-@require_api_key
+@require_dashboard_or_api_key
 @rate_limit(limit=3, window_seconds=60 * 60, key_prefix="weekly_report")
 def weekly_report():
     conn = get_db()

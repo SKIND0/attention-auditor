@@ -383,7 +383,8 @@ function sendToServer() {
           const msg =
             (payload && (payload.error || payload.message)) ||
             `HTTP ${r.status}`;
-          throw new Error(msg);
+          const hint = payload && payload.hint ? ` ${payload.hint}` : "";
+          throw new Error(`${msg}${hint}`);
         }
         return payload;
       })
