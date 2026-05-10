@@ -6,8 +6,12 @@ from datetime import date, datetime
 from functools import wraps
 import time
 from collections import deque
+from urllib.parse import urlparse, urlunparse
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
+# Railway terminates TLS in front of Gunicorn; trust forwarded Host / proto so request.host_url matches the browser.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
 
 import os
 
@@ -155,6 +159,64 @@ def _api_key_matches():
     return _provided_api_key() == API_KEY
 
 
+def _origin_scheme_variants(base: str):
+    """Same host as both https:// and http:// so dashboard auth works behind TLS-terminated proxies."""
+    out = set()
+    raw = (base or "").strip().rstrip("/")
+    if not raw:
+        return out
+    out.add(raw)
+    try:
+        if "://" not in raw:
+            parsed = urlparse("https://" + raw)
+        else:
+            parsed = urlparse(raw)
+        host = (parsed.netloc or "").strip()
+        if not host:
+            return out
+        for scheme in ("https", "http"):
+            out.add(urlunparse((scheme, host, "", "", "", "")).rstrip("/"))
+    except Exception:
+        pass
+    return out
+
+
+def _dashboard_allowed_origins():
+    allowed = set()
+    for o in _parse_origins(os.environ.get("DASHBOARD_ORIGINS", "")):
+        allowed.update(_origin_scheme_variants(o))
+    for o in cors_origins:
+        if o:
+            allowed.update(_origin_scheme_variants(o))
+    allowed.update(_origin_scheme_variants(request.host_url.rstrip("/")))
+    railway_dom = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "").strip()
+    if railway_dom:
+        allowed.update(_origin_scheme_variants(f"https://{railway_dom}"))
+    return allowed
+
+
+def _request_hostname():
+    h = (request.host or "").strip()
+    if not h:
+        return None
+    return h.split(":")[0].lower()
+
+
+def _url_hostname(url):
+    if not url:
+        return None
+    try:
+        u = url.strip()
+        if not u:
+            return None
+        if "://" not in u:
+            u = "https://" + u
+        hn = urlparse(u).hostname
+        return hn.lower() if hn else None
+    except Exception:
+        return None
+
+
 def _dashboard_browser_allowed():
     """Allow GET /api/* reads from the hosted dashboard without pasting a key (same-origin)."""
     if not API_KEY:
@@ -162,9 +224,7 @@ def _dashboard_browser_allowed():
     origin = (request.headers.get("Origin") or "").strip().rstrip("/")
     referer = (request.headers.get("Referer") or "").strip()
 
-    allowed = set(_parse_origins(os.environ.get("DASHBOARD_ORIGINS", "")))
-    allowed.update(o for o in cors_origins if o)
-    allowed.add(request.host_url.rstrip("/"))
+    allowed = _dashboard_allowed_origins()
 
     def matches_any(url):
         if not url:
@@ -182,6 +242,24 @@ def _dashboard_browser_allowed():
         return True
     if referer and matches_any(referer):
         return True
+    # Railway/public URL drift: trust requests whose Origin/Referer hostname equals this app's Host
+    req_h = _request_hostname()
+    if req_h:
+        for cand in (origin, referer):
+            if _url_hostname(cand) == req_h:
+                return True
+    # Navigate-from-URL-bar / strict browsers: same Host as request
+    if request.host:
+        host_only_origins = _origin_scheme_variants(request.host)
+        if origin and origin in host_only_origins:
+            return True
+        if referer:
+            try:
+                ru = urlparse(referer)
+                if ru.netloc == request.host:
+                    return True
+            except Exception:
+                pass
     return False
 
 
