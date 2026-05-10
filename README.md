@@ -2,7 +2,7 @@
 
 A Chrome browser extension that tracks your browsing habits, stores usage data in a cloud database, and uses AI to categorize sites and generate personalized motivational feedback.
 
-**Live dashboard:** Use your deployed Railway URL (root `/`), for example `https://attention-auditor-production.up.railway.app` — or open `http://127.0.0.1:5000` when running the backend locally.
+**Live dashboard:** Use your deployed Railway URL (root `/`), for example `https://attention-auditor-production.up.railway.app`, or open `http://127.0.0.1:5000` when running the backend locally.
 
 ---
 
