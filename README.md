@@ -1,95 +1,73 @@
 # Attention Auditor
 
-A Chrome browser extension that tracks your browsing habits, stores usage data in a cloud database, and uses AI to categorize sites and generate personalized motivational feedback.
+A Chrome browser extension that tracks your browsing habits, stores usage data in a cloud database, and uses AI to categorize sites and generate personalized productivity feedback.
 
-**Live app:** Same URL for everyone’s backend — **each browser profile** gets its own **Device ID** (UUID). Paste that ID at **`/login`** once per browser; the dashboard then shows **only that profile’s** synced history.
-
----
-
-## Multi-user (one Railway, private dashboards)
-
-- **Extension:** Creates `clientToken` (UUID) on first run and sends **`X-Client-Token`** on every sync.
-- **Dashboard:** Visit **`/login`**, paste the UUID from the extension popup → session cookie → **`/`** loads charts for **that user only**.
-- **Categories:** Stored **per user** (`client_token` + `domain`), so classifications don’t leak between people on the shared database.
-
-Treat the Device ID like a **password**: anyone with it can view that profile’s aggregates on your server until you rotate DB rows or they lose access.
+Each browser profile gets its own **Device ID** (UUID). Paste that ID at `/login` once per browser — the dashboard then shows **only that profile's** data.
 
 ---
 
 ## How It Works
 
-1. The Chrome extension runs in the background and detects which sites you visit and how long you spend on each one.
-2. Every minute, it sends that data to a Flask backend hosted on Railway (or your machine), tagged with your **Device ID**.
-3. The backend stores everything in a MySQL database organized by day **per Device ID**.
-4. New domains can be categorized as **productive**, **distracting**, or **neutral** using OpenAI's API (optional flows). Common sites can use hardcoded categories; you can manually override any categorization.
+1. The Chrome extension runs in the background, detecting which sites you visit and how long you spend on each one.
+2. Every minute, it sends that data to a Flask backend (hosted on Railway or self-hosted), tagged with your Device ID.
+3. The backend stores everything in a MySQL database, organized by day and scoped per Device ID.
+4. New domains are automatically categorized as **productive**, **distracting**, or **neutral** — first checked against 400+ built-in defaults, then OpenAI for anything unknown.
 5. The web dashboard displays your stats with interactive charts, color-coded by category.
-6. Click a personality button (Coach, Advisor, or Mentor) to get AI-generated feedback based on your browsing patterns.
+6. AI-powered features analyze your patterns: anomaly detection compares today to your 7-day average, personality-based feedback (Coach/Advisor/Mentor) gives motivational insights, and a weekly narrative report summarizes your browsing like a newspaper article.
 
 ---
 
-## Local vs cloud (extension puzzle menu)
+## Multi-User System
 
-| Where | What you see |
-|--------|----------------|
-| **Extension popup** (puzzle icon → Attention Auditor) | **Always** today’s stats from **local storage** on this computer. Works when Railway is down or your Wi‑Fi is off. Sync errors appear under “Last error” but your local times still update while you browse. |
-| **Web dashboard** (`/` after **`/login`**) | Reads **your** rows from MySQL (matching your Device ID session). Use **Log out** to switch users on the same computer. |
+- **Extension:** Generates a `clientToken` (UUID) on first install and sends it as `X-Client-Token` on every sync.
+- **Dashboard:** Visit `/login`, paste the UUID from the extension popup → session cookie → `/` loads charts for that user only.
+- **Categories:** Stored per user (`client_token` + `domain`), so classifications don't leak between users on a shared database.
+- **Isolation:** All database queries are filtered by `client_token`. User A cannot see User B's data.
 
-The popup **does not need an API key** to display local sites. Configure **Sync API key** only when the server sets `ATTENTION_AUDITOR_API_KEY`.
-
----
-
-## Authentication
-
-- **Device ID:** Extension sends **`X-Client-Token`** (UUID) with **`POST /api/track`**. Required for all uploads.
-- **Dashboard session:** After **`/login`**, the browser cookie selects which user’s data **`GET /api/*`** returns. Same-origin / hostname checks still apply when `ATTENTION_AUDITOR_API_KEY` is set.
-- **Automation:** **`ATTENTION_AUDITOR_API_KEY`** + **`X-Client-Token`** header can call dashboard JSON endpoints without a browser session.
-
-**Railway / production:** set **`FLASK_SECRET_KEY`** (long random string) so login sessions can’t be forged. On HTTPS, set **`SESSION_COOKIE_SECURE=1`**.
-
-**Public deployment safety:** when `FLASK_DEBUG` is not set, the backend **requires** `ATTENTION_AUDITOR_API_KEY` and will refuse to start without it. This prevents anonymous users from spamming `POST /api/track` (and running up database / OpenAI costs). The extension popup has a “Sync API key” field for this value.
-
-Optional **`DASHBOARD_ORIGINS`**: extra allowed origins for browser API reads (rare).
+Treat the Device ID like a password — anyone with it can view that profile's browsing history on your server.
 
 ---
 
 ## Features
 
 **Browsing Tracker**
-
 - Tracks active tabs and calculates time per domain
-- Merges subdomains (e.g., `www.zara.com` and `account.zara.com` → `zara.com`)
-- Custom domain aliases (e.g., Canvas hosts → `touro.edu`)
+- Merges subdomains (`www.zara.com` and `account.zara.com` → `zara.com`)
+- Custom domain aliases (e.g., `touro.instructure.com` → `touro.edu`)
+- Handles international TLDs (`.co.uk`, `.com.au`, etc.)
 - Filters Chrome internal pages
-- Pauses when Chrome loses focus (debounced for split-screen use)
-- Pauses when the computer is idle for 60+ seconds
-- Stores data locally when the server is unavailable, sends when it reconnects
+- Idle detection — pauses after 60 seconds of no input
+- Window focus detection — pauses when Chrome loses focus
+- Persists tracking state to survive service worker suspension (MV3)
+- Stores data locally when server is unavailable, syncs when it reconnects
+- Delta-based sync — only sends new seconds, never double-counts
 
 **AI Site Categorization**
-
-- Hybrid approach: hardcoded defaults for common sites, OpenAI for unknown domains (when you run categorization)
+- 400+ built-in domain categories seeded automatically for new users
+- OpenAI (gpt-4o-mini) categorizes unknown domains on demand
 - Categories: productive (green), distracting (red), neutral (yellow)
-- Results cached in database — each domain only categorized once
-- Manual override endpoint for corrections
+- Results cached per user — each domain categorized once
+- Manual override via API endpoint
 
-**AI Motivational Feedback**
-
-- Three personality styles: Coach (encouraging), Advisor (direct), Mentor (thoughtful)
-- Analyzes today's browsing data including productive vs. distracting time
-- References your actual sites and time spent in the response
+**AI Analytics**
+- **Anomaly Detection:** Auto-compares today's browsing to 7-day average on dashboard load. Flags sites at 2-3x above normal, unusual productive/distracting ratios, and new sites.
+- **Quick Feedback:** Three personality styles (Coach, Advisor, Mentor) generate 3-4 sentences referencing your actual sites and times.
+- **Weekly Narrative Report:** AI generates a newspaper-style article with headline, biggest wins, biggest drains, best/worst days, and two experiments for next week.
 
 **Web Dashboard**
-
-- Today's breakdown with ranked site list and category badges
-- Productive / distracting / neutral time summary
-- Doughnut chart (top 10 sites, colored by category)
-- Weekly trends line chart
-- All-time usage bar chart
-- AI Insights section with personality selector buttons
+- Stat strip: total tracked, productive, distracting, neutral, site count
+- Today's breakdown: top 10 with "Show more" button, progress bars by category
+- Anomaly detection card with color-coded flags and today vs. average comparison
+- AI section with tabs for Quick Feedback and Weekly Report
+- Weekly totals line chart (7-day window, missing days filled as zero)
+- All-time usage bar chart (top 10)
+- Login/logout system per Device ID
 
 **Extension Popup**
-
-- Quick view of today's stats from local storage
-- Works even when the server is down (local totals still accumulate)
+- Always shows today's stats from local storage (works offline)
+- Device ID display with copy button and dashboard login link
+- Server URL configuration
+- Live status: focus, idle, tracking state, sync telemetry
 
 ---
 
@@ -99,29 +77,32 @@ Optional **`DASHBOARD_ORIGINS`**: extra allowed origins for browser API reads (r
 |-----------|------------|
 | Extension | JavaScript, HTML, CSS (Chrome Manifest V3) |
 | Backend | Python, Flask, Flask-CORS |
-| Database | MySQL (hosted on Railway or locally) |
+| Database | MySQL |
 | AI | OpenAI API (gpt-4o-mini) |
 | Hosting | Railway |
+| Charts | Chart.js |
 
 ---
 
 ## Project Structure
 
 ```
-attention-auditor-private/
-├── background.js              # Tab tracking, time calculation, server sync
-├── manifest.json              # Extension config and permissions
-├── popup.html                 # Extension popup UI
-├── popup.js                   # Displays local stats and sync status
+attention-auditor/
+├── background.js                # Tab tracking, time calculation, server sync
+├── manifest.json                # Extension config and permissions
+├── popup.html                   # Extension popup UI
+├── popup.js                     # Local stats display and settings
+├── icon.svg                     # Extension icon
 │
 ├── attention-auditor-backend/
-│   ├── app.py                 # Flask server with all API endpoints
-│   ├── requirements.txt       # Python dependencies
-│   ├── Procfile               # Railway deployment config
-│   ├── runtime.txt            # Python version for Railway
+│   ├── app.py                   # Flask server with all API endpoints
+│   ├── builtin_categories.py    # 400+ default domain categorizations
+│   ├── requirements.txt         # Python dependencies
+│   ├── Procfile                 # Railway/gunicorn config
+│   ├── runtime.txt              # Python version
 │   └── templates/
-│       ├── dashboard.html     # Web dashboard (after login)
-│       └── login.html         # Paste Device ID
+│       ├── dashboard.html       # Web dashboard
+│       └── login.html           # Device ID login page
 │
 └── README.md
 ```
@@ -135,12 +116,9 @@ attention-auditor-private/
 - Google Chrome
 - Python 3.12+
 - MySQL
-- An OpenAI API key (for AI feedback / categorization features)
+- An OpenAI API key ([platform.openai.com](https://platform.openai.com))
 
 ### Database Setup
-
-1. Open MySQL Workbench and connect to your local server.
-2. Create the database and tables:
 
 ```sql
 CREATE DATABASE attention_auditor;
@@ -175,71 +153,36 @@ CREATE TABLE site_categories (
 );
 ```
 
-### Migrating an older single-tenant database
-
-If you already have tables **without** `client_token`, run something like the following once (pick one legacy UUID for old rows, or truncate tables instead):
-
-```sql
-USE attention_auditor;
-
-ALTER TABLE browsing_data ADD COLUMN client_token VARCHAR(36) NULL AFTER id;
-ALTER TABLE daily_summary ADD COLUMN client_token VARCHAR(36) NULL FIRST;
-ALTER TABLE site_categories ADD COLUMN client_token VARCHAR(36) NULL FIRST;
-
-SET @legacy = '00000000-0000-4000-8000-000000000001';
-UPDATE browsing_data SET client_token = @legacy WHERE client_token IS NULL;
-UPDATE daily_summary SET client_token = @legacy WHERE client_token IS NULL;
-UPDATE site_categories SET client_token = @legacy WHERE client_token IS NULL;
-
-ALTER TABLE daily_summary DROP INDEX unique_domain_date;
-ALTER TABLE browsing_data MODIFY client_token VARCHAR(36) NOT NULL;
-ALTER TABLE daily_summary MODIFY client_token VARCHAR(36) NOT NULL;
-ALTER TABLE site_categories MODIFY client_token VARCHAR(36) NOT NULL;
-ALTER TABLE daily_summary ADD UNIQUE KEY uq_client_domain_day (client_token, domain, visit_date);
-
-ALTER TABLE site_categories DROP PRIMARY KEY;
-ALTER TABLE site_categories ADD PRIMARY KEY (client_token, domain);
-```
-
-If `site_categories` had only `PRIMARY KEY (domain)`, drop/add PK as above. Adjust index names if MySQL reports conflicts.
-
 ### Backend Setup
 
-1. Navigate to the `attention-auditor-backend/` folder.
-2. Install dependencies:
-
-```
+```bash
+cd attention-auditor-backend
 pip install -r requirements.txt
+FLASK_DEBUG=1 python app.py
 ```
 
-3. Run the server:
-
-```
-python app.py
-```
-
-4. With `FLASK_DEBUG=1`, it can prompt for MySQL password and OpenAI API key if env vars are missing. For Railway, set variables in the dashboard instead.
-
-5. Set **`FLASK_SECRET_KEY`** in the environment (required when `FLASK_DEBUG` is not set).
-6. Open **`http://127.0.0.1:5000/login`**, paste your extension **Device ID**, then open the dashboard.
+With `FLASK_DEBUG=1`, it prompts for MySQL password and OpenAI key if env vars aren't set. The dashboard will be at `http://localhost:5000`.
 
 ### Extension Setup
 
-1. **Optional:** Popup → **Server URL** → e.g. `http://127.0.0.1:5000` or your Railway URL → Save. Leave blank for the default in `background.js`.
-2. Copy **Device ID** from the popup → open **`/login`** on that server → paste → submit.
-3. **If your server uses `ATTENTION_AUDITOR_API_KEY`:** paste the same value under **Sync API key** and Save.
-4. Chrome → `chrome://extensions` → Developer mode → **Load unpacked** → folder with `manifest.json`.
-5. Pin the extension if you like.
+1. Chrome → `chrome://extensions` → Developer mode → **Load unpacked** → select the project root folder
+2. Open the extension popup → copy your **Device ID**
+3. Go to `http://localhost:5000/login` → paste the Device ID → submit
+4. Optional: set **Server URL** in the popup if not using the default
 
 ---
 
-## Deploying on Railway (checklist)
+## Deploying on Railway
 
-1. Provision **MySQL** with the **multi-user schema** above (or run migration SQL).
-2. Set **`OPENAI_API_KEY`**, **`FLASK_SECRET_KEY`**, and optionally **`SESSION_COOKIE_SECURE=1`**.
-3. Recommended: **`ATTENTION_AUDITOR_API_KEY`** + matching **Sync API key** in the extension.
-4. **`CORS_ORIGINS`** includes your public HTTPS URL (and local URLs if you test that way).
-5. Deploy; **`/login`** → Device ID → **`/`** → browse with extension → confirm charts fill for **that** ID only.
+1. Provision **MySQL** and run the schema above
+2. Set environment variables on the web service:
+   - `MYSQLHOST`, `MYSQLPORT`, `MYSQLUSER`, `MYSQLPASSWORD`, `MYSQLDATABASE` (copy from MySQL service)
+   - `OPENAI_API_KEY`
+   - `FLASK_SECRET_KEY` (long random string for session cookies)
+   - `ATTENTION_AUDITOR_API_KEY` (required in production — protects `/api/track` from anonymous writes)
+3. Optional: `SESSION_COOKIE_SECURE=1`, `CORS_ORIGINS` (your Railway URL + localhost)
+4. Deploy from GitHub; set root directory to `attention-auditor-backend`
+5. Install extension → copy Device ID → paste at `/login` on your Railway URL
 
 ---
 
@@ -247,34 +190,57 @@ python app.py
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET/POST | `/login` | Paste **Device ID** (UUID) → session |
-| POST | `/api/track` | Extension upload; headers **`X-Client-Token`** + optional **`X-ATTENTION-AUDITOR-KEY`** |
-| GET | `/api/stats` | Stats for **session user** (or API key + **`X-Client-Token`**) |
-| GET | `/api/stats/weekly` | Last 7 days for that user |
-| GET | `/api/feedback?personality=coach` | AI feedback for that user’s today |
-| GET | `/api/categories` | That user’s categories |
-| POST | `/api/categorize-all` | AI categorize gaps (**API key** + **`X-Client-Token`**) |
-| POST | `/api/categories/update` | Override category (**API key** + **`X-Client-Token`**) |
+| GET/POST | `/login` | Paste Device ID → session cookie |
+| GET | `/logout` | Clear session |
+| POST | `/api/track` | Extension upload (`X-Client-Token` + `X-ATTENTION-AUDITOR-KEY`) |
+| GET | `/api/stats?date=YYYY-MM-DD` | Today's and all-time stats for session user |
+| GET | `/api/stats/weekly` | Last 7 days for session user |
+| GET | `/api/feedback?personality=coach` | AI feedback (coach, advisor, or mentor) |
+| GET | `/api/anomalies?date=YYYY-MM-DD` | Anomaly detection vs 7-day average |
+| GET | `/api/weekly-report` | AI-generated weekly narrative report |
+| GET | `/api/categories` | User's categorized domains |
+| POST | `/api/categorize-all` | AI-categorize all uncategorized domains |
+| POST | `/api/categories/update` | Manually override a domain's category |
 
 ---
 
-## Privacy Note
+## Environment Variables
 
-This extension requires `tabs` and `<all_urls>` permissions to track browsing activity. It can see every URL you visit and how long you spend there. All data is stored in your own database (local or Railway-hosted). No data is shared with third parties other than OpenAI when you explicitly request AI feedback or when categorization calls OpenAI.
-
-This project was built in part to demonstrate how much data browser extensions can access with minimal user awareness.
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `MYSQLHOST` | Yes | Database host |
+| `MYSQLPORT` | Yes | Database port |
+| `MYSQLUSER` | Yes | Database user |
+| `MYSQLPASSWORD` | Yes | Database password |
+| `MYSQLDATABASE` | Yes | Database name |
+| `OPENAI_API_KEY` | Yes | OpenAI API key for categorization and feedback |
+| `FLASK_SECRET_KEY` | Production | Secret for session cookies |
+| `ATTENTION_AUDITOR_API_KEY` | Production | Required to protect write endpoints |
+| `FLASK_DEBUG` | Dev only | Set to `1` for local development |
+| `CORS_ORIGINS` | Optional | Comma-separated allowed origins |
+| `SESSION_COOKIE_SECURE` | Optional | Set to `1` for HTTPS-only cookies |
+| `AUTO_CATEGORIZE_ON_TRACK` | Optional | Set to `1` to auto-categorize on data upload |
 
 ---
 
 ## Known Limitations
 
-- The extension tracks the **active tab** only — if a site is open but you're interacting with a different tab, that time is not captured. Passive viewing (like a Zoom call on a second monitor) won't be fully tracked.
-- Only one browser profile should run the extension against one database at a time; otherwise totals mix without per-user separation.
-- The idle detector pauses tracking after 60 seconds of no mouse or keyboard input. Short idle periods under 60 seconds are still counted.
+- **Active tab only** — tracks the tab you're interacting with, not all visible tabs. Passive viewing (e.g., Zoom on a second monitor) won't be fully captured.
+- **Focus detection** — tracking pauses when Chrome loses window focus. This can under-count during split-screen usage where Chrome is visible but not the active window.
+- **Idle threshold** — 60 seconds of no input before pausing. Brief idle periods under 60 seconds are still counted.
+- **Timezone** — the dashboard sends the browser's local date to avoid UTC mismatch with Railway, but the weekly chart date generation may still use UTC in some edge cases.
+
+---
+
+## Privacy Note
+
+This extension requires `tabs` and `<all_urls>` permissions to track browsing activity. It can see every URL you visit and how long you spend there. All data is stored in your own database. No data is shared with third parties other than OpenAI when you request AI feedback or when a new domain needs categorization.
+
+This project was built in part to demonstrate how much data browser extensions can access with minimal user awareness.
 
 ---
 
 ## Built By
 
-Sarah Kind  
+Sarah Kind
 Semester Project — Spring 2026
