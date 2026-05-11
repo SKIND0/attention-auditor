@@ -1,10 +1,11 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, session, redirect, url_for, g
 from flask_cors import CORS
 from openai import OpenAI
 import mysql.connector
 from datetime import date, datetime
 from functools import wraps
 import time
+import uuid as uuid_mod
 from collections import deque
 from urllib.parse import urlparse, urlunparse
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -15,10 +16,18 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_
 
 import os
 
+IS_DEBUG = os.environ.get("FLASK_DEBUG") == "1"
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or (
+    "dev-local-attention-auditor-not-for-production" if IS_DEBUG else None
+)
+if not app.secret_key:
+    raise RuntimeError("Set FLASK_SECRET_KEY for production (required for login sessions).")
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "0") == "1"
+
 def _parse_origins(value: str):
     return [o.strip() for o in (value or "").split(",") if o.strip()]
-
-IS_DEBUG = os.environ.get("FLASK_DEBUG") == "1"
 
 # CORS: allow only known dashboard origins (comma-separated).
 # Note: CORS is NOT authentication; it only controls which browser origins can read responses.
@@ -33,6 +42,28 @@ CORS(app, resources={r"/api/*": {"origins": cors_origins}})
 # API key auth (optional): if ATTENTION_AUDITOR_API_KEY is set:
 # - Extension POST endpoints always require this key (browser dashboard uses same-origin trust for GETs).
 API_KEY = os.environ.get("ATTENTION_AUDITOR_API_KEY")
+
+
+def _safe_redirect_path(raw_next):
+    if (
+        isinstance(raw_next, str)
+        and raw_next.startswith("/")
+        and not raw_next.startswith("//")
+    ):
+        return raw_next
+    return "/"
+
+
+def _normalize_client_token(raw):
+    if not raw or not isinstance(raw, str):
+        return None
+    s = raw.strip().lower()
+    try:
+        uuid_mod.UUID(s)
+        return s
+    except (ValueError, AttributeError, TypeError):
+        return None
+
 
 AUTO_CATEGORIZE_ON_TRACK = os.environ.get("AUTO_CATEGORIZE_ON_TRACK") == "1"
 MAX_NEW_DOMAINS_TO_CATEGORIZE_PER_TRACK = int(os.environ.get("MAX_NEW_DOMAINS_TO_CATEGORIZE_PER_TRACK", "5"))
@@ -277,18 +308,41 @@ def require_extension_api_key(fn):
     return wrapper
 
 
-def require_dashboard_or_api_key(fn):
-    """Public reads from your dashboard page (same origin), or any caller with the shared API key."""
+def require_extension_client_token(fn):
+    """Extension POST bodies must include X-Client-Token (UUID) — one logical user per browser profile."""
 
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if not API_KEY:
-            return fn(*args, **kwargs)
-        if _api_key_matches():
-            return fn(*args, **kwargs)
-        if _dashboard_browser_allowed():
-            return fn(*args, **kwargs)
-        return jsonify({"error": "Unauthorized"}), 401
+        ct = _normalize_client_token(request.headers.get("X-Client-Token"))
+        if not ct:
+            return jsonify({"error": "Missing or invalid X-Client-Token (copy Device ID from the extension popup)"}), 400
+        g.client_token = ct
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def require_dashboard_data(fn):
+    """Dashboard JSON APIs: session login stores client_token, or API key + X-Client-Token for automation."""
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        ct = _normalize_client_token(session.get("client_token"))
+        hdr_ct = _normalize_client_token(request.headers.get("X-Client-Token"))
+        if API_KEY and _api_key_matches() and hdr_ct:
+            ct = hdr_ct
+        if not ct:
+            return jsonify({"error": "Login required", "login": "/login"}), 401
+
+        if API_KEY:
+            if not (_api_key_matches() or _dashboard_browser_allowed()):
+                return jsonify({"error": "Unauthorized"}), 401
+        else:
+            if not _dashboard_browser_allowed():
+                return jsonify({"error": "Unauthorized"}), 401
+
+        g.client_token = ct
+        return fn(*args, **kwargs)
 
     return wrapper
 
@@ -319,12 +373,15 @@ def get_db():
         password=db_password,
         database=db_name
     )
-def categorize_domain(domain):
-    """Check database first, then ask AI if unknown."""
+def categorize_domain(client_token, domain):
+    """Check database first for this user, then ask AI if unknown."""
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
 
-    cursor.execute("SELECT category FROM site_categories WHERE domain = %s", (domain,))
+    cursor.execute(
+        "SELECT category FROM site_categories WHERE client_token = %s AND domain = %s",
+        (client_token, domain),
+    )
     row = cursor.fetchone()
 
     if row:
@@ -346,8 +403,8 @@ def categorize_domain(domain):
         category = "neutral"
 
     cursor.execute(
-        "INSERT INTO site_categories (domain, category, source) VALUES (%s, %s, 'ai')",
-        (domain, category)
+        "INSERT INTO site_categories (client_token, domain, category, source) VALUES (%s, %s, %s, 'ai')",
+        (client_token, domain, category),
     )
     conn.commit()
     cursor.close()
@@ -355,12 +412,39 @@ def categorize_domain(domain):
     return category
 
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    err = None
+    next_default = _safe_redirect_path(request.args.get("next"))
+    if request.method == "POST":
+        token = (request.form.get("client_token") or "").strip()
+        ct = _normalize_client_token(token)
+        next_url = _safe_redirect_path(request.form.get("next")) or next_default
+        next_for_form = next_url
+        if not ct:
+            err = "Paste the UUID from your extension (Device ID)."
+            return render_template("login.html", error=err, next=next_for_form)
+        session["client_token"] = ct
+        session.permanent = True
+        return redirect(next_url)
+    return render_template("login.html", error=err, next=next_default)
+
+
+@app.route("/logout")
+def logout():
+    session.pop("client_token", None)
+    return redirect(url_for("login"))
+
+
 @app.route("/api/track", methods=["POST"])
 @require_extension_api_key
+@require_extension_client_token
 def track():
     data = request.get_json()
     if not data or "sites" not in data:
         return jsonify({"error": "No data provided"}), 400
+
+    ct = g.client_token
 
     record_date_str = data.get("date")
     try:
@@ -377,14 +461,14 @@ def track():
         if domain and seconds > 0:
             received_at = datetime.now()
             cursor.execute(
-                "INSERT INTO browsing_data (domain, seconds_spent, recorded_at) VALUES (%s, %s, %s)",
-                (domain, seconds, received_at)
+                "INSERT INTO browsing_data (client_token, domain, seconds_spent, recorded_at) VALUES (%s, %s, %s, %s)",
+                (ct, domain, seconds, received_at),
             )
             cursor.execute(
-                """INSERT INTO daily_summary (domain, total_seconds, visit_date)
-                   VALUES (%s, %s, %s)
+                """INSERT INTO daily_summary (client_token, domain, total_seconds, visit_date)
+                   VALUES (%s, %s, %s, %s)
                    ON DUPLICATE KEY UPDATE total_seconds = total_seconds + %s""",
-                (domain, seconds, record_date, seconds)
+                (ct, domain, seconds, record_date, seconds),
             )
 
     conn.commit()
@@ -408,8 +492,8 @@ def track():
             cur = conn.cursor()
             placeholders = ",".join(["%s"] * len(incoming_domains))
             cur.execute(
-                f"SELECT domain FROM site_categories WHERE domain IN ({placeholders})",
-                tuple(incoming_domains),
+                f"SELECT domain FROM site_categories WHERE client_token = %s AND domain IN ({placeholders})",
+                (ct, *incoming_domains),
             )
             categorized = {row[0] for row in cur.fetchall()}
             cur.close()
@@ -420,7 +504,7 @@ def track():
 
             for domain in to_categorize:
                 try:
-                    categorize_domain(domain)
+                    categorize_domain(ct, domain)
                 except Exception as e:
                     print(f"Could not categorize {domain}: {e}")
 
@@ -428,29 +512,32 @@ def track():
 
 
 @app.route("/api/stats", methods=["GET"])
-@require_dashboard_or_api_key
+@require_dashboard_data
 def stats():
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
 
+    ct = g.client_token
     today_str = request.args.get("date", str(date.today()))
 
     cursor.execute(
         """SELECT d.domain, d.total_seconds, COALESCE(c.category, 'neutral') as category
            FROM daily_summary d
-           LEFT JOIN site_categories c ON d.domain = c.domain
-           WHERE d.visit_date = %s
+           LEFT JOIN site_categories c ON d.client_token = c.client_token AND d.domain = c.domain
+           WHERE d.client_token = %s AND d.visit_date = %s
            ORDER BY d.total_seconds DESC""",
-        (today_str,)
+        (ct, today_str),
     )
     today = cursor.fetchall()
 
     cursor.execute(
         """SELECT d.domain, SUM(d.total_seconds) as total_seconds, COALESCE(c.category, 'neutral') as category
            FROM daily_summary d
-           LEFT JOIN site_categories c ON d.domain = c.domain
+           LEFT JOIN site_categories c ON d.client_token = c.client_token AND d.domain = c.domain
+           WHERE d.client_token = %s
            GROUP BY d.domain, c.category
-           ORDER BY total_seconds DESC"""
+           ORDER BY total_seconds DESC""",
+        (ct,),
     )
     all_time = cursor.fetchall()
 
@@ -460,20 +547,26 @@ def stats():
 
 @app.route("/")
 def dashboard():
+    if not _normalize_client_token(session.get("client_token")):
+        return redirect(url_for("login", next="/"))
     return render_template("dashboard.html")
 
 
 @app.route("/api/stats/weekly", methods=["GET"])
-@require_dashboard_or_api_key
+@require_dashboard_data
 def weekly_stats():
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
 
+    ct = g.client_token
+
     cursor.execute(
         """SELECT visit_date, domain, total_seconds
            FROM daily_summary
-           WHERE visit_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-           ORDER BY visit_date DESC, total_seconds DESC"""
+           WHERE client_token = %s
+             AND visit_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+           ORDER BY visit_date DESC, total_seconds DESC""",
+        (ct,),
     )
     rows = cursor.fetchall()
 
@@ -490,9 +583,11 @@ def weekly_stats():
     cursor.execute(
         """SELECT visit_date, SUM(total_seconds) as total
            FROM daily_summary
-           WHERE visit_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+           WHERE client_token = %s
+             AND visit_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
            GROUP BY visit_date
-           ORDER BY visit_date ASC"""
+           ORDER BY visit_date ASC""",
+        (ct,),
     )
     daily_totals = cursor.fetchall()
     for row in daily_totals:
@@ -504,11 +599,14 @@ def weekly_stats():
 
 
 @app.route("/api/categories", methods=["GET"])
-@require_dashboard_or_api_key
+@require_dashboard_data
 def get_categories():
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT domain, category, source FROM site_categories ORDER BY category, domain")
+    cursor.execute(
+        "SELECT domain, category, source FROM site_categories WHERE client_token = %s ORDER BY category, domain",
+        (g.client_token,),
+    )
     rows = cursor.fetchall()
     cursor.close()
     conn.close()
@@ -517,14 +615,21 @@ def get_categories():
 
 @app.route("/api/categorize-all", methods=["POST"])
 @require_extension_api_key
+@require_extension_client_token
 @rate_limit(limit=CATEGORIZE_ALL_RATE_LIMIT_PER_HOUR, window_seconds=60 * 60, key_prefix="categorize_all")
 def categorize_all():
     """Find all domains in browsing data that aren't categorized yet and categorize them."""
+    ct = g.client_token
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
     cursor.execute(
-        """SELECT DISTINCT domain FROM daily_summary
-           WHERE domain NOT IN (SELECT domain FROM site_categories)"""
+        """SELECT DISTINCT d.domain FROM daily_summary d
+           WHERE d.client_token = %s
+           AND NOT EXISTS (
+             SELECT 1 FROM site_categories c
+             WHERE c.client_token = d.client_token AND c.domain = d.domain
+           )""",
+        (ct,),
     )
     uncategorized = cursor.fetchall()
     cursor.close()
@@ -533,13 +638,15 @@ def categorize_all():
     results = {}
     for row in uncategorized:
         domain = row["domain"]
-        category = categorize_domain(domain)
+        category = categorize_domain(ct, domain)
         results[domain] = category
 
     return jsonify({"categorized": results, "count": len(results)}), 200
 
+
 @app.route("/api/categories/update", methods=["POST"])
 @require_extension_api_key
+@require_extension_client_token
 def update_category():
     data = request.get_json()
     domain = data.get("domain")
@@ -548,13 +655,14 @@ def update_category():
     if not domain or category not in ("productive", "distracting", "neutral"):
         return jsonify({"error": "Provide domain and category (productive/distracting/neutral)"}), 400
 
+    ct = g.client_token
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute(
-        """INSERT INTO site_categories (domain, category, source)
-           VALUES (%s, %s, 'user')
+        """INSERT INTO site_categories (client_token, domain, category, source)
+           VALUES (%s, %s, %s, 'user')
            ON DUPLICATE KEY UPDATE category = %s, source = 'user'""",
-        (domain, category, category)
+        (ct, domain, category, category),
     )
     conn.commit()
     cursor.close()
@@ -562,7 +670,7 @@ def update_category():
     return jsonify({"domain": domain, "category": category, "source": "user"}), 200
 
 @app.route("/api/feedback", methods=["GET"])
-@require_dashboard_or_api_key
+@require_dashboard_data
 @rate_limit(limit=FEEDBACK_RATE_LIMIT_PER_MINUTE, window_seconds=60, key_prefix="feedback")
 def feedback():
     personality = request.args.get("personality", "coach")
@@ -575,16 +683,19 @@ def feedback():
 
     system_prompt = personalities.get(personality, personalities["coach"])
 
+    ct = g.client_token
+    today_str = request.args.get("date", str(date.today()))
+
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
 
     cursor.execute(
         """SELECT d.domain, d.total_seconds, COALESCE(c.category, 'neutral') as category
            FROM daily_summary d
-           LEFT JOIN site_categories c ON d.domain = c.domain
-           WHERE d.visit_date = %s
+           LEFT JOIN site_categories c ON d.client_token = c.client_token AND d.domain = c.domain
+           WHERE d.client_token = %s AND d.visit_date = %s
            ORDER BY d.total_seconds DESC""",
-        (date.today(),)
+        (ct, today_str),
     )
     today = cursor.fetchall()
 
@@ -622,21 +733,22 @@ def feedback():
 
 
 @app.route("/api/anomalies", methods=["GET"])
-@require_dashboard_or_api_key
+@require_dashboard_data
 def anomalies():
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
 
+    ct = g.client_token
     today_str = request.args.get("date", str(date.today()))
 
     # Get today's data
     cursor.execute(
         """SELECT d.domain, d.total_seconds, COALESCE(c.category, 'neutral') as category
            FROM daily_summary d
-           LEFT JOIN site_categories c ON d.domain = c.domain
-           WHERE d.visit_date = %s
+           LEFT JOIN site_categories c ON d.client_token = c.client_token AND d.domain = c.domain
+           WHERE d.client_token = %s AND d.visit_date = %s
            ORDER BY d.total_seconds DESC""",
-        (today_str,)
+        (ct, today_str),
     )
     today = cursor.fetchall()
 
@@ -646,10 +758,11 @@ def anomalies():
                   ROUND(AVG(d.total_seconds)) as avg_seconds,
                   COUNT(DISTINCT d.visit_date) as days_seen
            FROM daily_summary d
-           WHERE d.visit_date >= DATE_SUB(%s, INTERVAL 7 DAY)
+           WHERE d.client_token = %s
+             AND d.visit_date >= DATE_SUB(%s, INTERVAL 7 DAY)
              AND d.visit_date < %s
            GROUP BY d.domain""",
-        (today_str, today_str)
+        (ct, today_str, today_str),
     )
     averages = {row["domain"]: row for row in cursor.fetchall()}
 
@@ -661,14 +774,15 @@ def anomalies():
                SELECT d.visit_date, COALESCE(c.category, 'neutral') as category,
                       SUM(d.total_seconds) as daily_total
                FROM daily_summary d
-               LEFT JOIN site_categories c ON d.domain = c.domain
-               WHERE d.visit_date >= DATE_SUB(%s, INTERVAL 7 DAY)
+               LEFT JOIN site_categories c ON d.client_token = c.client_token AND d.domain = c.domain
+               WHERE d.client_token = %s
+                 AND d.visit_date >= DATE_SUB(%s, INTERVAL 7 DAY)
                  AND d.visit_date < %s
                GROUP BY d.visit_date, c.category
            ) sub
            LEFT JOIN site_categories c ON 1=0
            GROUP BY category""",
-        (today_str, today_str)
+        (ct, today_str, today_str),
     )
     cat_avgs = {row["category"]: int(row["avg_seconds"]) for row in cursor.fetchall()}
 
@@ -717,18 +831,21 @@ def anomalies():
     }), 200
 
 @app.route("/api/weekly-report", methods=["GET"])
-@require_dashboard_or_api_key
+@require_dashboard_data
 @rate_limit(limit=3, window_seconds=60 * 60, key_prefix="weekly_report")
 def weekly_report():
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
 
+    ct = g.client_token
     cursor.execute(
         """SELECT d.visit_date, d.domain, d.total_seconds, COALESCE(c.category, 'neutral') as category
            FROM daily_summary d
-           LEFT JOIN site_categories c ON d.domain = c.domain
-           WHERE d.visit_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-           ORDER BY d.visit_date ASC, d.total_seconds DESC"""
+           LEFT JOIN site_categories c ON d.client_token = c.client_token AND d.domain = c.domain
+           WHERE d.client_token = %s
+             AND d.visit_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+           ORDER BY d.visit_date ASC, d.total_seconds DESC""",
+        (ct,),
     )
     rows = cursor.fetchall()
 

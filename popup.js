@@ -3,6 +3,8 @@ chrome.runtime.sendMessage({ type: "flushSession" });
 const DEFAULT_SERVER_URL =
   "https://attention-auditor-production.up.railway.app";
 
+const CLIENT_TOKEN_KEY = "clientToken";
+
 function formatTime(seconds) {
   if (seconds < 60) return seconds + "s";
   let minutes = Math.floor(seconds / 60);
@@ -94,6 +96,22 @@ function normalizeServerUrl(input) {
   return trimmed.replace(/\/+$/, "");
 }
 
+function effectiveServerBase(result) {
+  const u = normalizeServerUrl(result.serverUrl);
+  return u || DEFAULT_SERVER_URL;
+}
+
+function renderDevicePanel(result) {
+  const tokenEl = document.getElementById("deviceId");
+  const linkEl = document.getElementById("dashboardLoginLink");
+  if (!tokenEl || !linkEl) return;
+
+  const tok = result[CLIENT_TOKEN_KEY];
+  tokenEl.value = typeof tok === "string" ? tok : "";
+  const base = effectiveServerBase(result);
+  linkEl.href = `${base}/login`;
+}
+
 function initSettingsUI() {
   const serverUrlInput = document.getElementById("serverUrl");
   const apiKeyInput = document.getElementById("apiKey");
@@ -101,9 +119,10 @@ function initSettingsUI() {
 
   if (!serverUrlInput || !apiKeyInput || !saveBtn) return;
 
-  chrome.storage.local.get(["serverUrl", "apiKey"], (result) => {
+  chrome.storage.local.get(["serverUrl", "apiKey", CLIENT_TOKEN_KEY], (result) => {
     serverUrlInput.value = result.serverUrl || "";
     apiKeyInput.value = result.apiKey || "";
+    renderDevicePanel(result);
   });
 
   saveBtn.addEventListener("click", () => {
@@ -112,18 +131,29 @@ function initSettingsUI() {
 
     // Save blank to "unset" (background falls back to default)
     chrome.storage.local.set({ serverUrl, apiKey }, () => {
+      chrome.storage.local.get(["serverUrl", CLIENT_TOKEN_KEY], renderDevicePanel);
       saveBtn.textContent = "Saved";
       setTimeout(() => (saveBtn.textContent = "Save"), 800);
     });
   });
 }
 
+document.getElementById("copyDeviceId")?.addEventListener("click", () => {
+  const el = document.getElementById("deviceId");
+  const v = el && el.value ? el.value : "";
+  if (!v) return;
+  navigator.clipboard.writeText(v).catch(() => {
+    el.select();
+    document.execCommand("copy");
+  });
+});
+
 function loadAndRenderToday() {
   const todayKey = getTodayKey();
   const storageKey = `siteData_${todayKey}`;
 
   chrome.storage.local.get(
-    [storageKey, "trackingState", "lastSyncAt", "lastSyncUrl", "lastSyncError"],
+    [storageKey, "trackingState", "lastSyncAt", "lastSyncUrl", "lastSyncError", CLIENT_TOKEN_KEY, "serverUrl"],
     (result) => {
     const todayData = result[storageKey] || {};
     renderStatus(result.trackingState);
@@ -132,6 +162,7 @@ function loadAndRenderToday() {
       lastSyncUrl: result.lastSyncUrl,
       lastSyncError: result.lastSyncError,
     });
+    renderDevicePanel(result);
 
     const sites = Object.entries(todayData)
       .filter(
@@ -157,7 +188,9 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     changes.trackingState ||
     changes.lastSyncAt ||
     changes.lastSyncUrl ||
-    changes.lastSyncError
+    changes.lastSyncError ||
+    changes[CLIENT_TOKEN_KEY] ||
+    changes.serverUrl
   ) {
     loadAndRenderToday();
   }

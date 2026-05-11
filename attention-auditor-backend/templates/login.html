@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attention Auditor — Sign in</title>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #060810;
+            --green: #00ff9d;
+            --muted: #5a6070;
+            --border: rgba(255,255,255,0.1);
+            --text: #e8e8e8;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: 'IBM Plex Mono', monospace;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .card {
+            width: 100%;
+            max-width: 420px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 32px;
+            background: rgba(255,255,255,0.03);
+        }
+        h1 {
+            font-family: 'Playfair Display', serif;
+            font-size: 28px;
+            margin: 0 0 8px;
+            font-weight: 700;
+        }
+        h1 span { color: var(--green); }
+        p.lead {
+            font-size: 12px;
+            color: var(--muted);
+            line-height: 1.6;
+            margin: 0 0 24px;
+        }
+        label {
+            display: block;
+            font-size: 10px;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 8px;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 12px 14px;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            background: rgba(0,0,0,0.35);
+            color: #ddd;
+            font-family: inherit;
+            font-size: 13px;
+            margin-bottom: 16px;
+        }
+        input:focus { outline: none; border-color: var(--green); }
+        button[type="submit"] {
+            width: 100%;
+            padding: 12px;
+            border-radius: 4px;
+            border: 1px solid var(--green);
+            background: rgba(0,255,157,0.12);
+            color: var(--green);
+            font-family: inherit;
+            font-size: 11px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            cursor: pointer;
+        }
+        button[type="submit"]:hover { filter: brightness(1.1); }
+        .err {
+            background: rgba(255,45,85,0.12);
+            border: 1px solid rgba(255,45,85,0.3);
+            color: #ff6b8a;
+            padding: 10px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-bottom: 16px;
+        }
+        .hint {
+            margin-top: 20px;
+            font-size: 11px;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1>Attention <span>Auditor</span></h1>
+    <p class="lead">Open the extension popup → copy your <strong>Device ID</strong> → paste it here. Each browser profile has its own dashboard.</p>
+    {% if error %}
+    <div class="err">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('login') }}">
+        <input type="hidden" name="next" value="{{ next }}" />
+        <label for="client_token">Device ID (UUID)</label>
+        <input type="text" id="client_token" name="client_token" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off" spellcheck="false" />
+        <button type="submit">View my dashboard</button>
+    </form>
+    <p class="hint">This sets a session cookie in your browser. Use Log out on the dashboard to switch users.</p>
+</div>
+</body>
+</html>

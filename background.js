@@ -6,6 +6,20 @@ let isIdle = false;
 let isWindowFocused = true;
 
 const TRACKING_STATE_KEY = "trackingState";
+const CLIENT_TOKEN_KEY = "clientToken";
+
+/** One UUID per browser profile — identifies this user on the shared Railway backend. */
+function ensureClientToken(callback) {
+  chrome.storage.local.get([CLIENT_TOKEN_KEY], (r) => {
+    let t = r[CLIENT_TOKEN_KEY];
+    if (typeof t === "string" && /^[0-9a-f-]{36}$/i.test(t)) {
+      callback(t);
+      return;
+    }
+    t = crypto.randomUUID();
+    chrome.storage.local.set({ [CLIENT_TOKEN_KEY]: t }, () => callback(t));
+  });
+}
 
 function saveTrackingState() {
   chrome.storage.local.set({
@@ -324,91 +338,92 @@ function pruneOldDays() {
 // ─── Server sync ──────────────────────────────────────────────────────────────
 
 function sendToServer() {
-  const todayKey = getTodayKey();
-  const storageKey = `siteData_${todayKey}`;
-  const lastSentKey = `lastSent_${todayKey}`;
-  const pendingDeltaKey = `pendingDelta_${todayKey}`;
+  ensureClientToken((clientToken) => {
+    const todayKey = getTodayKey();
+    const storageKey = `siteData_${todayKey}`;
+    const lastSentKey = `lastSent_${todayKey}`;
+    const pendingDeltaKey = `pendingDelta_${todayKey}`;
 
-  chrome.storage.local.get(
-    [storageKey, lastSentKey, pendingDeltaKey, "apiKey", "serverUrl"],
-    (result) => {
-    const todayData = result[storageKey] || {};
-    const lastSent = result[lastSentKey] || {};
-    const pendingDelta = result[pendingDeltaKey] || {};
-    const apiKey = result.apiKey || null;
-    const baseUrl =
-      (result.serverUrl && String(result.serverUrl).trim().replace(/\/+$/, "")) ||
-      "https://attention-auditor-production.up.railway.app";
-    const trackUrl = `${baseUrl}/api/track`;
+    chrome.storage.local.get(
+      [storageKey, lastSentKey, pendingDeltaKey, "apiKey", "serverUrl"],
+      (result) => {
+        const todayData = result[storageKey] || {};
+        const lastSent = result[lastSentKey] || {};
+        const pendingDelta = result[pendingDeltaKey] || {};
+        const apiKey = result.apiKey || null;
+        const baseUrl =
+          (result.serverUrl && String(result.serverUrl).trim().replace(/\/+$/, "")) ||
+          "https://attention-auditor-production.up.railway.app";
+        const trackUrl = `${baseUrl}/api/track`;
 
-    // Compute delta since last successful send, then merge any previously-failed delta.
-    const delta = {};
-    for (const [domain, total] of Object.entries(todayData)) {
-      const last = lastSent[domain] || 0;
-      const diff = total - last;
-      if (diff > 0) delta[domain] = diff;
-    }
-    const mergedToSend = { ...pendingDelta };
-    for (const [domain, secs] of Object.entries(delta)) {
-      mergedToSend[domain] = (mergedToSend[domain] || 0) + secs;
-    }
-
-    const sites = Object.entries(mergedToSend)
-      .filter(([, secs]) => secs > 0)
-      .map(([domain, seconds]) => ({ domain, seconds }));
-
-    if (sites.length === 0) return;
-
-    chrome.storage.local.set({
-      lastSyncUrl: trackUrl,
-      lastSyncAttemptAt: Date.now(),
-    });
-
-    fetch(trackUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(apiKey ? { "X-ATTENTION-AUDITOR-KEY": apiKey } : {}),
-      },
-      body: JSON.stringify({ sites, date: todayKey }),
-    })
-      .then(async (r) => {
-        let payload = null;
-        try {
-          payload = await r.json();
-        } catch {
-          payload = null;
+        // Compute delta since last successful send, then merge any previously-failed delta.
+        const delta = {};
+        for (const [domain, total] of Object.entries(todayData)) {
+          const last = lastSent[domain] || 0;
+          const diff = total - last;
+          if (diff > 0) delta[domain] = diff;
         }
-        if (!r.ok) {
-          const msg =
-            (payload && (payload.error || payload.message)) ||
-            `HTTP ${r.status}`;
-          const hint = payload && payload.hint ? ` ${payload.hint}` : "";
-          throw new Error(`${msg}${hint}`);
+        const mergedToSend = { ...pendingDelta };
+        for (const [domain, secs] of Object.entries(delta)) {
+          mergedToSend[domain] = (mergedToSend[domain] || 0) + secs;
         }
-        return payload;
-      })
-      .then((data) => {
-        console.log("Sent to server:", data);
-        // Keep local totals (so popup is never empty). Only advance lastSent + clear pending delta.
+
+        const sites = Object.entries(mergedToSend)
+          .filter(([, secs]) => secs > 0)
+          .map(([domain, seconds]) => ({ domain, seconds }));
+
+        if (sites.length === 0) return;
+
         chrome.storage.local.set({
-          [lastSentKey]: todayData,
-          [pendingDeltaKey]: {},
-          lastSyncAt: Date.now(),
-          lastSyncError: "",
+          lastSyncUrl: trackUrl,
+          lastSyncAttemptAt: Date.now(),
         });
-        pruneOldDays();
-      })
-      .catch((err) => {
-        console.log("Server not available, will retry:", err.message);
-        // Save the delta we tried to send so it isn't lost (but keep accumulating todayData normally).
-        chrome.storage.local.set({
-          [pendingDeltaKey]: mergedToSend,
-          lastSyncError: String(err?.message || err || "Unknown error"),
-        });
-      });
-    }
-  );
+
+        fetch(trackUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Client-Token": clientToken,
+            ...(apiKey ? { "X-ATTENTION-AUDITOR-KEY": apiKey } : {}),
+          },
+          body: JSON.stringify({ sites, date: todayKey }),
+        })
+          .then(async (r) => {
+            let payload = null;
+            try {
+              payload = await r.json();
+            } catch {
+              payload = null;
+            }
+            if (!r.ok) {
+              const msg =
+                (payload && (payload.error || payload.message)) ||
+                `HTTP ${r.status}`;
+              const hint = payload && payload.hint ? ` ${payload.hint}` : "";
+              throw new Error(`${msg}${hint}`);
+            }
+            return payload;
+          })
+          .then((data) => {
+            console.log("Sent to server:", data);
+            chrome.storage.local.set({
+              [lastSentKey]: todayData,
+              [pendingDeltaKey]: {},
+              lastSyncAt: Date.now(),
+              lastSyncError: "",
+            });
+            pruneOldDays();
+          })
+          .catch((err) => {
+            console.log("Server not available, will retry:", err.message);
+            chrome.storage.local.set({
+              [pendingDeltaKey]: mergedToSend,
+              lastSyncError: String(err?.message || err || "Unknown error"),
+            });
+          });
+      }
+    );
+  });
 }
 
 // ─── Alarms ───────────────────────────────────────────────────────────────────
@@ -456,12 +471,16 @@ function initTrackingFromActiveTab() {
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("Extension installed/refreshed");
-  initTrackingFromActiveTab();
-  sendToServer();
+  ensureClientToken(() => {
+    initTrackingFromActiveTab();
+    sendToServer();
+  });
 });
 
 chrome.runtime.onStartup.addListener(() => {
   console.log("Browser started");
-  initTrackingFromActiveTab();
-  sendToServer();
+  ensureClientToken(() => {
+    initTrackingFromActiveTab();
+    sendToServer();
+  });
 });

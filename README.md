@@ -2,15 +2,25 @@
 
 A Chrome browser extension that tracks your browsing habits, stores usage data in a cloud database, and uses AI to categorize sites and generate personalized motivational feedback.
 
-**Live dashboard:** Use your deployed Railway URL (root `/`), for example `https://attention-auditor-production.up.railway.app`, or open `http://127.0.0.1:5000` when running the backend locally.
+**Live app:** Same URL for everyone’s backend — **each browser profile** gets its own **Device ID** (UUID). Paste that ID at **`/login`** once per browser; the dashboard then shows **only that profile’s** synced history.
+
+---
+
+## Multi-user (one Railway, private dashboards)
+
+- **Extension:** Creates `clientToken` (UUID) on first run and sends **`X-Client-Token`** on every sync.
+- **Dashboard:** Visit **`/login`**, paste the UUID from the extension popup → session cookie → **`/`** loads charts for **that user only**.
+- **Categories:** Stored **per user** (`client_token` + `domain`), so classifications don’t leak between people on the shared database.
+
+Treat the Device ID like a **password**: anyone with it can view that profile’s aggregates on your server until you rotate DB rows or they lose access.
 
 ---
 
 ## How It Works
 
 1. The Chrome extension runs in the background and detects which sites you visit and how long you spend on each one.
-2. Every minute, it sends that data to a Flask backend hosted on Railway (or your machine).
-3. The backend stores everything in a MySQL database organized by day.
+2. Every minute, it sends that data to a Flask backend hosted on Railway (or your machine), tagged with your **Device ID**.
+3. The backend stores everything in a MySQL database organized by day **per Device ID**.
 4. New domains can be categorized as **productive**, **distracting**, or **neutral** using OpenAI's API (optional flows). Common sites can use hardcoded categories; you can manually override any categorization.
 5. The web dashboard displays your stats with interactive charts, color-coded by category.
 6. Click a personality button (Coach, Advisor, or Mentor) to get AI-generated feedback based on your browsing patterns.
@@ -22,18 +32,21 @@ A Chrome browser extension that tracks your browsing habits, stores usage data i
 | Where | What you see |
 |--------|----------------|
 | **Extension popup** (puzzle icon → Attention Auditor) | **Always** today’s stats from **local storage** on this computer. Works when Railway is down or your Wi‑Fi is off. Sync errors appear under “Last error” but your local times still update while you browse. |
-| **Web dashboard** (`/` on your backend) | Reads from the **database** (MySQL). Shows data only after the extension has successfully synced. Requires the backend and database to be up. |
+| **Web dashboard** (`/` after **`/login`**) | Reads **your** rows from MySQL (matching your Device ID session). Use **Log out** to switch users on the same computer. |
 
-The popup **does not need an API key** to display sites. You only need to configure **Sync API key** in the popup when your server sets `ATTENTION_AUDITOR_API_KEY` (see below).
+The popup **does not need an API key** to display local sites. Configure **Sync API key** only when the server sets `ATTENTION_AUDITOR_API_KEY`.
 
 ---
 
-## Authentication (dashboard vs extension)
+## Authentication
 
-- **Web dashboard:** Opening the dashboard **on the same host** as the API (e.g. `https://yourservice.up.railway.app/`) is enough to load charts and AI insights. You **do not** paste an API key into the webpage.
-- **Extension upload (`POST /api/track`):** If `ATTENTION_AUDITOR_API_KEY` is set on the server, the extension must send the same value (popup → **Sync API key** → Save). If that env var is **unset**, uploads work without a key (fine for local dev; **not** recommended on a public URL).
+- **Device ID:** Extension sends **`X-Client-Token`** (UUID) with **`POST /api/track`**. Required for all uploads.
+- **Dashboard session:** After **`/login`**, the browser cookie selects which user’s data **`GET /api/*`** returns. Same-origin / hostname checks still apply when `ATTENTION_AUDITOR_API_KEY` is set.
+- **Automation:** **`ATTENTION_AUDITOR_API_KEY`** + **`X-Client-Token`** header can call dashboard JSON endpoints without a browser session.
 
-Optional env **`DASHBOARD_ORIGINS`**: comma-separated list of extra allowed origins for dashboard API reads (only needed if your public URL differs from `CORS_ORIGINS` / the request host).
+**Railway / production:** set **`FLASK_SECRET_KEY`** (long random string) so login sessions can’t be forged. On HTTPS, set **`SESSION_COOKIE_SECURE=1`**.
+
+Optional **`DASHBOARD_ORIGINS`**: extra allowed origins for browser API reads (rare).
 
 ---
 
@@ -105,7 +118,8 @@ attention-auditor-private/
 │   ├── Procfile               # Railway deployment config
 │   ├── runtime.txt            # Python version for Railway
 │   └── templates/
-│       └── dashboard.html     # Web dashboard
+│       ├── dashboard.html     # Web dashboard (after login)
+│       └── login.html         # Paste Device ID
 │
 └── README.md
 ```
@@ -132,27 +146,60 @@ USE attention_auditor;
 
 CREATE TABLE browsing_data (
     id INT AUTO_INCREMENT PRIMARY KEY,
+    client_token VARCHAR(36) NOT NULL,
     domain VARCHAR(255) NOT NULL,
     seconds_spent INT NOT NULL,
-    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_client_recorded (client_token, recorded_at)
 );
 
 CREATE TABLE daily_summary (
     id INT AUTO_INCREMENT PRIMARY KEY,
+    client_token VARCHAR(36) NOT NULL,
     domain VARCHAR(255) NOT NULL,
     total_seconds INT NOT NULL,
-    visit_date DATE NOT NULL
+    visit_date DATE NOT NULL,
+    UNIQUE KEY uq_client_domain_day (client_token, domain, visit_date),
+    INDEX idx_client_visit (client_token, visit_date)
 );
-
-ALTER TABLE daily_summary ADD UNIQUE KEY unique_domain_date (domain, visit_date);
 
 CREATE TABLE site_categories (
-    domain VARCHAR(255) PRIMARY KEY,
+    client_token VARCHAR(36) NOT NULL,
+    domain VARCHAR(255) NOT NULL,
     category ENUM('productive', 'distracting', 'neutral') NOT NULL,
     source ENUM('default', 'ai', 'user') NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (client_token, domain)
 );
 ```
+
+### Migrating an older single-tenant database
+
+If you already have tables **without** `client_token`, run something like the following once (pick one legacy UUID for old rows, or truncate tables instead):
+
+```sql
+USE attention_auditor;
+
+ALTER TABLE browsing_data ADD COLUMN client_token VARCHAR(36) NULL AFTER id;
+ALTER TABLE daily_summary ADD COLUMN client_token VARCHAR(36) NULL FIRST;
+ALTER TABLE site_categories ADD COLUMN client_token VARCHAR(36) NULL FIRST;
+
+SET @legacy = '00000000-0000-4000-8000-000000000001';
+UPDATE browsing_data SET client_token = @legacy WHERE client_token IS NULL;
+UPDATE daily_summary SET client_token = @legacy WHERE client_token IS NULL;
+UPDATE site_categories SET client_token = @legacy WHERE client_token IS NULL;
+
+ALTER TABLE daily_summary DROP INDEX unique_domain_date;
+ALTER TABLE browsing_data MODIFY client_token VARCHAR(36) NOT NULL;
+ALTER TABLE daily_summary MODIFY client_token VARCHAR(36) NOT NULL;
+ALTER TABLE site_categories MODIFY client_token VARCHAR(36) NOT NULL;
+ALTER TABLE daily_summary ADD UNIQUE KEY uq_client_domain_day (client_token, domain, visit_date);
+
+ALTER TABLE site_categories DROP PRIMARY KEY;
+ALTER TABLE site_categories ADD PRIMARY KEY (client_token, domain);
+```
+
+If `site_categories` had only `PRIMARY KEY (domain)`, drop/add PK as above. Adjust index names if MySQL reports conflicts.
 
 ### Backend Setup
 
@@ -171,26 +218,26 @@ python app.py
 
 4. With `FLASK_DEBUG=1`, it can prompt for MySQL password and OpenAI API key if env vars are missing. For Railway, set variables in the dashboard instead.
 
-5. The dashboard will be available at `http://127.0.0.1:5000`
+5. Set **`FLASK_SECRET_KEY`** in the environment (required when `FLASK_DEBUG` is not set).
+6. Open **`http://127.0.0.1:5000/login`**, paste your extension **Device ID**, then open the dashboard.
 
 ### Extension Setup
 
-1. **Optional:** Point the extension at your backend: open the popup → **Server URL** → e.g. `http://127.0.0.1:5000` or your Railway URL → Save. Leave blank to use the built-in default Railway URL in `background.js`.
-2. **If your server uses `ATTENTION_AUDITOR_API_KEY`:** paste the same value under **Sync API key** in the popup and Save.
-3. Open Chrome and go to `chrome://extensions`
-4. Enable **Developer mode** (top right)
-5. Click **Load unpacked** and select the **project folder** (the directory that contains `manifest.json`)
-6. Pin the extension from the puzzle piece icon
+1. **Optional:** Popup → **Server URL** → e.g. `http://127.0.0.1:5000` or your Railway URL → Save. Leave blank for the default in `background.js`.
+2. Copy **Device ID** from the popup → open **`/login`** on that server → paste → submit.
+3. **If your server uses `ATTENTION_AUDITOR_API_KEY`:** paste the same value under **Sync API key** and Save.
+4. Chrome → `chrome://extensions` → Developer mode → **Load unpacked** → folder with `manifest.json`.
+5. Pin the extension if you like.
 
 ---
 
 ## Deploying on Railway (checklist)
 
-1. Provision **MySQL** and attach connection variables (`MYSQLHOST`, `MYSQLUSER`, etc.).
-2. Set **`OPENAI_API_KEY`**.
-3. Recommended: set **`ATTENTION_AUDITOR_API_KEY`** to a long random string; put the **same** string in the extension popup **Sync API key**.
-4. Set **`CORS_ORIGINS`** to your public app URL (and `http://127.0.0.1:5000` if you still test locally against prod DB — rarely needed).
-5. Deploy; open the **root URL** in a browser to verify the dashboard loads data after the extension has synced.
+1. Provision **MySQL** with the **multi-user schema** above (or run migration SQL).
+2. Set **`OPENAI_API_KEY`**, **`FLASK_SECRET_KEY`**, and optionally **`SESSION_COOKIE_SECURE=1`**.
+3. Recommended: **`ATTENTION_AUDITOR_API_KEY`** + matching **Sync API key** in the extension.
+4. **`CORS_ORIGINS`** includes your public HTTPS URL (and local URLs if you test that way).
+5. Deploy; **`/login`** → Device ID → **`/`** → browse with extension → confirm charts fill for **that** ID only.
 
 ---
 
@@ -198,13 +245,14 @@ python app.py
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/track` | Receives browsing data from the extension (**requires API key when configured**) |
-| GET | `/api/stats` | Today's and all-time stats (dashboard same-origin **or** API key) |
-| GET | `/api/stats/weekly` | Last 7 days of data grouped by day |
-| GET | `/api/feedback?personality=coach` | AI-generated feedback (coach, advisor, or mentor) |
-| GET | `/api/categories` | Lists all categorized domains |
-| POST | `/api/categorize-all` | Categorizes uncategorized domains using AI (**requires API key when configured**) |
-| POST | `/api/categories/update` | Manually override a domain's category (**requires API key when configured**) |
+| GET/POST | `/login` | Paste **Device ID** (UUID) → session |
+| POST | `/api/track` | Extension upload; headers **`X-Client-Token`** + optional **`X-ATTENTION-AUDITOR-KEY`** |
+| GET | `/api/stats` | Stats for **session user** (or API key + **`X-Client-Token`**) |
+| GET | `/api/stats/weekly` | Last 7 days for that user |
+| GET | `/api/feedback?personality=coach` | AI feedback for that user’s today |
+| GET | `/api/categories` | That user’s categories |
+| POST | `/api/categorize-all` | AI categorize gaps (**API key** + **`X-Client-Token`**) |
+| POST | `/api/categories/update` | Override category (**API key** + **`X-Client-Token`**) |
 
 ---
 

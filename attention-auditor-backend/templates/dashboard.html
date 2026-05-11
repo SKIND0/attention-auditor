@@ -81,6 +81,15 @@
         .masthead-right { text-align: right; }
         .masthead-date { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; }
         .masthead-tagline { font-size: 11px; color: var(--muted); font-style: italic; margin-top: 4px; }
+        .masthead-actions { margin-top: 10px; }
+        .masthead-actions a {
+            font-size: 10px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--muted);
+            text-decoration: none;
+        }
+        .masthead-actions a:hover { color: var(--green); }
 
         .stat-strip {
             display: grid;
@@ -338,6 +347,7 @@
     <div class="masthead-right">
         <div class="masthead-date" id="mastheadDate">--</div>
         <div class="masthead-tagline">watching you watch the internet</div>
+        <div class="masthead-actions"><a href="/logout">Log out</a></div>
     </div>
 </div>
 

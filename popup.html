@@ -162,6 +162,21 @@
       color: #666;
       line-height: 1.3;
     }
+    .device-row input {
+      font-family: ui-monospace, monospace;
+      font-size: 10px;
+    }
+    .device-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    .device-actions a {
+      color: #7f5af0;
+      font-size: 11px;
+    }
   </style>
 </head>
 <body>
@@ -182,6 +197,17 @@
     <div><span class="label">Tracking</span>: <span class="value" id="trackingStatus">--</span></div>
   </div>
   <div class="settings">
+    <div class="row device-row">
+      <label for="deviceId">Your device ID (for dashboard login)</label>
+      <input id="deviceId" type="text" readonly placeholder="Saving…" />
+      <div class="hint">Each Chrome profile gets its own ID. Paste this on the server login page to see <strong>only</strong> your synced stats.</div>
+      <div class="device-actions">
+        <button type="button" class="btn" id="copyDeviceId">Copy ID</button>
+        <a id="dashboardLoginLink" href="#" target="_blank" rel="noopener">Dashboard login</a>
+      </div>
+    </div>
+  </div>
+  <div class="settings">
     <div class="row">
       <label for="serverUrl">Server URL (for sync)</label>
       <input id="serverUrl" placeholder="Leave blank for default Railway URL" />
@@ -190,7 +216,7 @@
     <div class="row">
       <label for="apiKey">Sync API key (only if your server uses one)</label>
       <input id="apiKey" placeholder="Same value as ATTENTION_AUDITOR_API_KEY on Railway" />
-      <div class="hint">Required for upload only when the backend sets <span style="color:#888">ATTENTION_AUDITOR_API_KEY</span>. The web dashboard does not need a key. Leave blank if your server has no API key.</div>
+      <div class="hint">Required for upload only when the backend sets <span style="color:#888">ATTENTION_AUDITOR_API_KEY</span>. The dashboard uses your Device ID at <strong>/login</strong>, not this field.</div>
     </div>
     <div class="actions">
       <button class="btn" id="saveSettings">Save</button>
