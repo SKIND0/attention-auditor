@@ -46,6 +46,8 @@ The popup **does not need an API key** to display local sites. Configure **Sync 
 
 **Railway / production:** set **`FLASK_SECRET_KEY`** (long random string) so login sessions can’t be forged. On HTTPS, set **`SESSION_COOKIE_SECURE=1`**.
 
+**Public deployment safety:** when `FLASK_DEBUG` is not set, the backend **requires** `ATTENTION_AUDITOR_API_KEY` and will refuse to start without it. This prevents anonymous users from spamming `POST /api/track` (and running up database / OpenAI costs). The extension popup has a “Sync API key” field for this value.
+
 Optional **`DASHBOARD_ORIGINS`**: extra allowed origins for browser API reads (rare).
 
 ---

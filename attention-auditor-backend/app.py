@@ -27,6 +27,8 @@ if not app.secret_key:
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "0") == "1"
+# Prevent huge POST bodies (basic DoS protection for public deploys).
+app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("MAX_CONTENT_LENGTH", str(64 * 1024)))  # 64KB default
 
 def _parse_origins(value: str):
     return [o.strip() for o in (value or "").split(",") if o.strip()]
@@ -44,6 +46,8 @@ CORS(app, resources={r"/api/*": {"origins": cors_origins}})
 # API key auth (optional): if ATTENTION_AUDITOR_API_KEY is set:
 # - Extension POST endpoints always require this key (browser dashboard uses same-origin trust for GETs).
 API_KEY = os.environ.get("ATTENTION_AUDITOR_API_KEY")
+if not API_KEY and not IS_DEBUG:
+    raise RuntimeError("Set ATTENTION_AUDITOR_API_KEY for production (required to protect /api/track).")
 
 
 def _safe_redirect_path(raw_next):
@@ -69,6 +73,9 @@ def _normalize_client_token(raw):
 
 AUTO_CATEGORIZE_ON_TRACK = os.environ.get("AUTO_CATEGORIZE_ON_TRACK") == "1"
 MAX_NEW_DOMAINS_TO_CATEGORIZE_PER_TRACK = int(os.environ.get("MAX_NEW_DOMAINS_TO_CATEGORIZE_PER_TRACK", "5"))
+MAX_SITES_PER_TRACK = int(os.environ.get("MAX_SITES_PER_TRACK", "250"))
+MAX_SECONDS_PER_SITE = int(os.environ.get("MAX_SECONDS_PER_SITE", str(24 * 60 * 60)))  # 24h cap per post row
+TRACK_RATE_LIMIT_PER_MINUTE = int(os.environ.get("TRACK_RATE_LIMIT_PER_MINUTE", "60"))
 
 FEEDBACK_RATE_LIMIT_PER_MINUTE = int(os.environ.get("FEEDBACK_RATE_LIMIT_PER_MINUTE", "6"))
 CATEGORIZE_ALL_RATE_LIMIT_PER_HOUR = int(os.environ.get("CATEGORIZE_ALL_RATE_LIMIT_PER_HOUR", "3"))
@@ -395,12 +402,11 @@ if not db_password:
 db_name = os.environ.get("MYSQLDATABASE") or os.environ.get("MYSQL_DATABASE", "attention_auditor")
 
 openai_api_key = os.environ.get("OPENAI_API_KEY")
-if not openai_api_key:
-    if IS_DEBUG:
-        openai_api_key = input("Enter OpenAI API key: ")
-    else:
-        raise RuntimeError("Missing OpenAI API key. Set OPENAI_API_KEY.")
-openai_client = OpenAI(api_key=openai_api_key)
+openai_client = OpenAI(api_key=openai_api_key) if openai_api_key else None
+
+
+def _openai_ready():
+    return openai_client is not None
 
 _AI_CATEGORY_SYSTEM = (
     "You label domains for a student productivity app. Answer with exactly one word: "
@@ -476,6 +482,18 @@ def categorize_domain(client_token, domain):
         return cat
 
     cur.close()
+    if not _openai_ready():
+        # No OpenAI key configured — default unknown domains to neutral and cache it.
+        category = "neutral"
+        cur3 = conn.cursor()
+        cur3.execute(
+            "INSERT INTO site_categories (client_token, domain, category, source) VALUES (%s, %s, %s, 'default')",
+            (client_token, domain, category),
+        )
+        conn.commit()
+        cur3.close()
+        conn.close()
+        return category
     response = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         max_tokens=12,
@@ -531,6 +549,7 @@ def logout():
 @app.route("/api/track", methods=["POST"])
 @require_extension_api_key
 @require_extension_client_token
+@rate_limit(limit=TRACK_RATE_LIMIT_PER_MINUTE, window_seconds=60, key_prefix="track")
 def track():
     data = request.get_json()
     if not data or "sites" not in data:
@@ -547,26 +566,43 @@ def track():
     conn = get_db()
     cursor = conn.cursor()
 
+    sites = data.get("sites") or []
+    if not isinstance(sites, list):
+        return jsonify({"error": "Invalid payload (sites must be a list)"}), 400
+    if len(sites) > MAX_SITES_PER_TRACK:
+        return jsonify({"error": f"Too many sites in one request (max {MAX_SITES_PER_TRACK})"}), 413
+
     tracked_domains = []
     seen_track = set()
-    for site in data["sites"]:
-        domain = site.get("domain")
+    received_at = datetime.now()
+    for site in sites:
+        if not isinstance(site, dict):
+            continue
+        domain = (site.get("domain") or "").strip().lower()
         seconds = site.get("seconds", 0)
-        if domain and seconds > 0:
-            if domain not in seen_track:
-                seen_track.add(domain)
-                tracked_domains.append(domain)
-            received_at = datetime.now()
-            cursor.execute(
-                "INSERT INTO browsing_data (client_token, domain, seconds_spent, recorded_at) VALUES (%s, %s, %s, %s)",
-                (ct, domain, seconds, received_at),
-            )
-            cursor.execute(
-                """INSERT INTO daily_summary (client_token, domain, total_seconds, visit_date)
-                   VALUES (%s, %s, %s, %s)
-                   ON DUPLICATE KEY UPDATE total_seconds = total_seconds + %s""",
-                (ct, domain, seconds, record_date, seconds),
-            )
+        try:
+            seconds = int(seconds)
+        except Exception:
+            seconds = 0
+        if not domain or seconds <= 0:
+            continue
+        if seconds > MAX_SECONDS_PER_SITE:
+            seconds = MAX_SECONDS_PER_SITE
+
+        if domain not in seen_track:
+            seen_track.add(domain)
+            tracked_domains.append(domain)
+
+        cursor.execute(
+            "INSERT INTO browsing_data (client_token, domain, seconds_spent, recorded_at) VALUES (%s, %s, %s, %s)",
+            (ct, domain, seconds, received_at),
+        )
+        cursor.execute(
+            """INSERT INTO daily_summary (client_token, domain, total_seconds, visit_date)
+               VALUES (%s, %s, %s, %s)
+               ON DUPLICATE KEY UPDATE total_seconds = total_seconds + %s""",
+            (ct, domain, seconds, record_date, seconds),
+        )
 
     conn.commit()
     for dom in tracked_domains:
@@ -773,6 +809,16 @@ def update_category():
 @rate_limit(limit=FEEDBACK_RATE_LIMIT_PER_MINUTE, window_seconds=60, key_prefix="feedback")
 def feedback():
     personality = request.args.get("personality", "coach")
+    if not _openai_ready():
+        return (
+            jsonify(
+                {
+                    "feedback": "AI feedback is disabled (missing OPENAI_API_KEY). Set OPENAI_API_KEY to enable Coach/Advisor/Mentor output.",
+                    "personality": personality,
+                }
+            ),
+            200,
+        )
 
     personalities = {
         "coach": "You are an encouraging productivity coach. Be motivational but honest. Use a supportive, energetic tone. Keep it to 3-4 sentences.",
@@ -932,6 +978,8 @@ def anomalies():
 @require_dashboard_data
 @rate_limit(limit=3, window_seconds=60 * 60, key_prefix="weekly_report")
 def weekly_report():
+    if not _openai_ready():
+        return jsonify({"report": "Weekly report is disabled (missing OPENAI_API_KEY)."}), 200
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
 
