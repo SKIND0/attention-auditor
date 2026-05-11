@@ -43,12 +43,7 @@ cors_origins = _parse_origins(
 )
 CORS(app, resources={r"/api/*": {"origins": cors_origins}})
 
-# API key auth (optional): if ATTENTION_AUDITOR_API_KEY is set:
-# - Extension POST endpoints always require this key (browser dashboard uses same-origin trust for GETs).
-API_KEY = os.environ.get("ATTENTION_AUDITOR_API_KEY")
-if not API_KEY and not IS_DEBUG:
-    raise RuntimeError("Set ATTENTION_AUDITOR_API_KEY for production (required to protect /api/track).")
-
+API_KEY = None  # Removed — Device ID + rate limiting is the security model
 
 def _safe_redirect_path(raw_next):
     if (
@@ -303,20 +298,6 @@ def _dashboard_browser_allowed():
     return False
 
 
-def require_extension_api_key(fn):
-    """POST/data ingestion and mutations — extension must send ATTENTION_AUDITOR_API_KEY when the server sets it."""
-
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if not API_KEY:
-            return fn(*args, **kwargs)
-        if _api_key_matches():
-            return fn(*args, **kwargs)
-        return jsonify({"error": "Unauthorized", "hint": "Extension: set API key in the popup settings."}), 401
-
-    return wrapper
-
-
 def require_extension_client_token(fn):
     """Extension POST bodies must include X-Client-Token (UUID) — one logical user per browser profile."""
 
@@ -547,7 +528,6 @@ def logout():
 
 
 @app.route("/api/track", methods=["POST"])
-@require_extension_api_key
 @require_extension_client_token
 @rate_limit(limit=TRACK_RATE_LIMIT_PER_MINUTE, window_seconds=60, key_prefix="track")
 def track():

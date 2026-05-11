@@ -404,12 +404,11 @@ function sendToServer() {
     const pendingDeltaKey = `pendingDelta_${todayKey}`;
 
     chrome.storage.local.get(
-      [storageKey, lastSentKey, pendingDeltaKey, "apiKey", "serverUrl"],
-      (result) => {
-        const todayData = result[storageKey] || {};
-        const lastSent = result[lastSentKey] || {};
-        const pendingDelta = result[pendingDeltaKey] || {};
-        const apiKey = result.apiKey || null;
+    [storageKey, lastSentKey, pendingDeltaKey, "serverUrl"],
+    (result) => {
+      const todayData = result[storageKey] || {};
+      const lastSent = result[lastSentKey] || {};
+      const pendingDelta = result[pendingDeltaKey] || {};
         const baseUrl =
           (result.serverUrl && String(result.serverUrl).trim().replace(/\/+$/, "")) ||
           "https://attention-auditor-production.up.railway.app";
@@ -443,7 +442,6 @@ function sendToServer() {
           headers: {
             "Content-Type": "application/json",
             "X-Client-Token": clientToken,
-            ...(apiKey ? { "X-ATTENTION-AUDITOR-KEY": apiKey } : {}),
           },
           body: JSON.stringify({ sites, date: todayKey }),
         })

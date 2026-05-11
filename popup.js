@@ -112,23 +112,17 @@ function renderDevicePanel(result) {
 
 function initSettingsUI() {
   const serverUrlInput = document.getElementById("serverUrl");
-  const apiKeyInput = document.getElementById("apiKey");
   const saveBtn = document.getElementById("saveSettings");
 
-  if (!serverUrlInput || !apiKeyInput || !saveBtn) return;
+  if (!serverUrlInput || !saveBtn) return;
 
-  chrome.storage.local.get(["serverUrl", "apiKey", CLIENT_TOKEN_KEY], (result) => {
+    chrome.storage.local.get(["serverUrl", CLIENT_TOKEN_KEY], (result) => {
     serverUrlInput.value = result.serverUrl || "";
-    apiKeyInput.value = result.apiKey || "";
-    renderDevicePanel(result);
   });
 
   saveBtn.addEventListener("click", () => {
     const serverUrl = normalizeServerUrl(serverUrlInput.value) || "";
-    const apiKey = String(apiKeyInput.value || "").trim();
-
-    // Save blank to "unset" (background falls back to default)
-    chrome.storage.local.set({ serverUrl, apiKey }, () => {
+    chrome.storage.local.set({ serverUrl }, () => {
       chrome.storage.local.get(["serverUrl", CLIENT_TOKEN_KEY], renderDevicePanel);
       saveBtn.textContent = "Saved";
       setTimeout(() => (saveBtn.textContent = "Save"), 800);
@@ -174,7 +168,7 @@ function loadAndRenderToday() {
               domain !== "0.1" && domain !== "localhost" && domain !== "localhost:5000"
           )
           .map(([domain, total_seconds]) => ({ domain, total_seconds }));
-
+        
         renderSites(sites);
       }
     );
