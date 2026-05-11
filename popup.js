@@ -168,7 +168,7 @@ function loadAndRenderToday() {
               domain !== "0.1" && domain !== "localhost" && domain !== "localhost:5000"
           )
           .map(([domain, total_seconds]) => ({ domain, total_seconds }));
-        
+
         renderSites(sites);
       }
     );

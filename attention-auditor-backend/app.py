@@ -730,7 +730,6 @@ def get_categories():
 
 
 @app.route("/api/categorize-all", methods=["POST"])
-@require_extension_api_key
 @require_extension_client_token
 @rate_limit(limit=CATEGORIZE_ALL_RATE_LIMIT_PER_HOUR, window_seconds=60 * 60, key_prefix="categorize_all")
 def categorize_all():
