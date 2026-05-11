@@ -93,13 +93,41 @@
 
         .stat-strip {
             display: grid;
-            grid-template-columns: repeat(5, 1fr);
+            grid-template-columns: repeat(2, 1fr);
             gap: 1px;
             background: var(--glass-border);
             border: 1px solid var(--glass-border);
             border-radius: 4px;
-            margin-bottom: 32px;
+            margin-bottom: 16px;
             overflow: hidden;
+        }
+        .category-details {
+            margin-bottom: 32px;
+            border: 1px solid var(--glass-border);
+            border-radius: 4px;
+            background: var(--glass-bg);
+        }
+        .category-details summary {
+            cursor: pointer;
+            padding: 12px 18px;
+            font-size: 10px;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: var(--muted);
+            list-style: none;
+        }
+        .category-details summary::-webkit-details-marker { display: none; }
+        .category-details summary::after {
+            content: ' +';
+            color: var(--purple);
+        }
+        .category-details[open] summary::after { content: ' −'; }
+        .category-details .stat-strip-inner {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1px;
+            background: var(--glass-border);
+            border-top: 1px solid var(--glass-border);
         }
         .stat-cell {
             background: var(--glass-bg);
@@ -227,6 +255,56 @@
             max-width: 110px;
         }
         .cat-select:focus { outline: none; border-color: var(--purple); }
+        /* Simplified list: hide labels & dropdowns until user opts in */
+        #siteList:not(.show-categories) .site-badge,
+        #siteList:not(.show-categories) .cat-select {
+            display: none !important;
+        }
+        #siteList:not(.show-categories) .bar-fill.green,
+        #siteList:not(.show-categories) .bar-fill.red,
+        #siteList:not(.show-categories) .bar-fill.amber {
+            background: rgba(255,255,255,0.14) !important;
+            box-shadow: none !important;
+        }
+        .page-footer {
+            margin-top: 48px;
+            padding-top: 28px;
+            border-top: 1px solid var(--glass-border);
+        }
+        .footer-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .footer-btn {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            padding: 10px 20px;
+            border-radius: 4px;
+            border: 1px solid var(--glass-border);
+            background: rgba(255,255,255,0.04);
+            color: var(--muted);
+            cursor: pointer;
+        }
+        .footer-btn:hover { border-color: var(--purple); color: var(--purple); }
+        .footer-out {
+            font-size: 10px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--muted);
+            text-decoration: none;
+        }
+        .footer-out:hover { color: var(--green); }
+        .footer-hint {
+            font-size: 11px;
+            color: var(--muted);
+            max-width: 520px;
+            line-height: 1.5;
+        }
         .chart-container { position: relative; height: 260px; }
         .loading { color: var(--muted); font-style: italic; text-align: center; padding: 20px; font-size: 12px; }
 
@@ -362,17 +440,22 @@
     <div class="masthead-right">
         <div class="masthead-date" id="mastheadDate">--</div>
         <div class="masthead-tagline">watching you watch the internet</div>
-        <div class="masthead-actions"><a href="/logout">Log out</a></div>
     </div>
 </div>
 
 <div class="stat-strip">
     <div class="stat-cell" data-label="Total tracked"><div class="val white cursor" id="totalTime">--</div></div>
-    <div class="stat-cell" data-label="Productive"><div class="val green" id="productiveTime">--</div></div>
-    <div class="stat-cell" data-label="Distracting"><div class="val red" id="distractingTime">--</div></div>
-    <div class="stat-cell" data-label="Neutral"><div class="val amber" id="neutralTime">--</div></div>
     <div class="stat-cell" data-label="Sites visited"><div class="val white" id="siteCount">--</div></div>
 </div>
+
+<details class="category-details">
+    <summary>Time by category (productive / distracting / neutral)</summary>
+    <div class="stat-strip-inner">
+        <div class="stat-cell" data-label="Productive"><div class="val green" id="productiveTime">--</div></div>
+        <div class="stat-cell" data-label="Distracting"><div class="val red" id="distractingTime">--</div></div>
+        <div class="stat-cell" data-label="Neutral"><div class="val amber" id="neutralTime">--</div></div>
+    </div>
+</details>
 
 <div class="grid">
 
@@ -446,6 +529,19 @@
     </div>
 
 </div>
+
+<footer class="page-footer">
+    <div class="footer-actions">
+        <button type="button" class="footer-btn" id="toggleCategoryEdit" aria-expanded="false">
+            Edit site labels & categories
+        </button>
+        <a class="footer-out" href="/logout">Log out</a>
+    </div>
+    <p class="footer-hint" id="categoryEditHint">
+        Tip: labeling is hidden until you turn it on here, so the main list stays clean. Use the menu on each row to fix Railway, GitHub, etc. if you disagree with the default.
+    </p>
+</footer>
+
 </div>
 
 <script>
@@ -549,7 +645,11 @@
     function getFeedback(personality) {
         const el = document.getElementById("feedbackText");
         el.textContent = "Running analysis...";
-        fetchJson("/api/feedback?personality=" + encodeURIComponent(personality))
+        const q = new URLSearchParams({
+            personality: personality,
+            date: todayDate,
+        });
+        fetchJson("/api/feedback?" + q.toString())
             .then(data => { el.textContent = data.feedback; })
             .catch((e) => { el.textContent = "Could not get feedback: " + e.message; });
     }
@@ -564,6 +664,20 @@
 
     Chart.defaults.color = '#5a6070';
     Chart.defaults.font = { family: "'IBM Plex Mono', monospace", size: 11 };
+
+    (function () {
+        const btn = document.getElementById("toggleCategoryEdit");
+        const list = document.getElementById("siteList");
+        const hint = document.getElementById("categoryEditHint");
+        if (!btn || !list) return;
+        btn.addEventListener("click", () => {
+            const on = !list.classList.contains("show-categories");
+            list.classList.toggle("show-categories", on);
+            btn.setAttribute("aria-expanded", on ? "true" : "false");
+            btn.textContent = on ? "Hide category labels" : "Edit site labels & categories";
+            if (hint) hint.style.display = on ? "none" : "";
+        });
+    })();
 
     fetchJson("/api/stats?date=" + encodeURIComponent(todayDate))
         .then(data => {

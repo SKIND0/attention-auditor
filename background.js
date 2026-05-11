@@ -50,11 +50,14 @@ function restoreTrackingState(cb) {
   });
 }
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "flushSession") {
-    saveElapsed();
-    if (startTime) startTime = Date.now(); // reset so we don't double-count
-    saveTrackingState();
+    saveElapsed(() => {
+      if (startTime) startTime = Date.now(); // reset so we don't double-count
+      saveTrackingState();
+      sendResponse({ ok: true });
+    });
+    return true; // async sendResponse
   }
 });
 
@@ -191,10 +194,18 @@ function getTodayKey() {
 
 // Saves elapsed seconds for currentSite into today's storage bucket.
 // Does NOT reset currentSite/startTime — call those separately.
-function saveElapsed() {
-  if (!currentSite || !startTime) return;
+// Optional done() runs after storage write (used when popup opens so totals are current).
+function saveElapsed(done) {
+  const finish = typeof done === "function" ? done : () => {};
+  if (!currentSite || !startTime) {
+    finish();
+    return;
+  }
   const seconds = Math.round((Date.now() - startTime) / 1000);
-  if (seconds < 1) return;
+  if (seconds < 1) {
+    finish();
+    return;
+  }
 
   const todayKey = getTodayKey();
   const storageKey = `siteData_${todayKey}`;
@@ -202,11 +213,13 @@ function saveElapsed() {
   chrome.storage.local.get([storageKey], (result) => {
     const siteData = result[storageKey] || {};
     siteData[currentSite] = (siteData[currentSite] || 0) + seconds;
-    chrome.storage.local.set({ [storageKey]: siteData });
-    console.log(
-      `Tracked ${seconds}s on ${currentSite} (Today total: ${siteData[currentSite]}s) [${todayKey}]`
-    );
-    saveTrackingState();
+    chrome.storage.local.set({ [storageKey]: siteData }, () => {
+      console.log(
+        `Tracked ${seconds}s on ${currentSite} (Today total: ${siteData[currentSite]}s) [${todayKey}]`
+      );
+      saveTrackingState();
+      finish();
+    });
   });
 }
 

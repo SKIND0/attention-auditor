@@ -1,5 +1,3 @@
-chrome.runtime.sendMessage({ type: "flushSession" });
-
 const DEFAULT_SERVER_URL =
   "https://attention-auditor-production.up.railway.app";
 
@@ -149,29 +147,37 @@ document.getElementById("copyDeviceId")?.addEventListener("click", () => {
 });
 
 function loadAndRenderToday() {
-  const todayKey = getTodayKey();
-  const storageKey = `siteData_${todayKey}`;
+  // Flush open tracking into storage first, then read — otherwise the popup races and shows stale totals.
+  chrome.runtime.sendMessage({ type: "flushSession" }, () => {
+    if (chrome.runtime.lastError) {
+      console.warn("flushSession:", chrome.runtime.lastError.message);
+    }
 
-  chrome.storage.local.get(
-    [storageKey, "trackingState", "lastSyncAt", "lastSyncUrl", "lastSyncError", CLIENT_TOKEN_KEY, "serverUrl"],
-    (result) => {
-    const todayData = result[storageKey] || {};
-    renderStatus(result.trackingState);
-    renderSync({
-      lastSyncAt: result.lastSyncAt,
-      lastSyncUrl: result.lastSyncUrl,
-      lastSyncError: result.lastSyncError,
-    });
-    renderDevicePanel(result);
+    const todayKey = getTodayKey();
+    const storageKey = `siteData_${todayKey}`;
 
-    const sites = Object.entries(todayData)
-      .filter(
-        ([domain]) =>
-          domain !== "0.1" && domain !== "localhost" && domain !== "localhost:5000"
-      )
-      .map(([domain, total_seconds]) => ({ domain, total_seconds }));
+    chrome.storage.local.get(
+      [storageKey, "trackingState", "lastSyncAt", "lastSyncUrl", "lastSyncError", CLIENT_TOKEN_KEY, "serverUrl"],
+      (result) => {
+        const todayData = result[storageKey] || {};
+        renderStatus(result.trackingState);
+        renderSync({
+          lastSyncAt: result.lastSyncAt,
+          lastSyncUrl: result.lastSyncUrl,
+          lastSyncError: result.lastSyncError,
+        });
+        renderDevicePanel(result);
 
-    renderSites(sites);
+        const sites = Object.entries(todayData)
+          .filter(
+            ([domain]) =>
+              domain !== "0.1" && domain !== "localhost" && domain !== "localhost:5000"
+          )
+          .map(([domain, total_seconds]) => ({ domain, total_seconds }));
+
+        renderSites(sites);
+      }
+    );
   });
 }
 
