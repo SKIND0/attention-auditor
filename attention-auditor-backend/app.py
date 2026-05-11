@@ -6,9 +6,11 @@ from datetime import date, datetime
 from functools import wraps
 import time
 import uuid as uuid_mod
-from collections import deque
+from collections import deque, defaultdict
 from urllib.parse import urlparse, urlunparse
 from werkzeug.middleware.proxy_fix import ProxyFix
+
+from builtin_categories import BUILTIN_SITE_CATEGORIES
 
 app = Flask(__name__)
 # Railway terminates TLS in front of Gunicorn; trust forwarded Host / proto so request.host_url matches the browser.
@@ -346,6 +348,41 @@ def require_dashboard_data(fn):
 
     return wrapper
 
+
+def require_category_write(fn):
+    """Logged-in dashboard (same-origin) or extension: API key + X-Client-Token when key is set."""
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        hdr_ct = _normalize_client_token(request.headers.get("X-Client-Token"))
+        sess_ct = _normalize_client_token(session.get("client_token"))
+
+        if API_KEY:
+            if _api_key_matches() and hdr_ct:
+                g.client_token = hdr_ct
+                return fn(*args, **kwargs)
+            if sess_ct and _dashboard_browser_allowed():
+                g.client_token = sess_ct
+                return fn(*args, **kwargs)
+            return (
+                jsonify(
+                    {
+                        "error": "Unauthorized",
+                        "hint": "Open /login in this browser, or send X-ATTENTION-AUDITOR-KEY and X-Client-Token.",
+                    }
+                ),
+                401,
+            )
+
+        ct = hdr_ct or sess_ct
+        if not ct:
+            return jsonify({"error": "Login at /login or send X-Client-Token"}), 401
+        g.client_token = ct
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
 db_host = os.environ.get("MYSQLHOST") or os.environ.get("MYSQL_HOST", "localhost")
 db_port = int(os.environ.get("MYSQLPORT") or os.environ.get("MYSQL_PORT", 3306))
 db_user = os.environ.get("MYSQLUSER") or os.environ.get("MYSQL_USER", "root")
@@ -365,6 +402,45 @@ if not openai_api_key:
         raise RuntimeError("Missing OpenAI API key. Set OPENAI_API_KEY.")
 openai_client = OpenAI(api_key=openai_api_key)
 
+_AI_CATEGORY_SYSTEM = (
+    "You label domains for a student productivity app. Answer with exactly one word: "
+    "productive, distracting, or neutral.\n"
+    "- productive: school, homework, coding, developer tools (GitHub, CI/CD, cloud dashboards, docs, package registries), "
+    "email, calendar, class video calls, learning sites, research.\n"
+    "- distracting: social feeds, short video, streaming TV, games, meme / gossip news.\n"
+    "- neutral: shopping, banking, maps, generic search, travel booking, utilities when unclear.\n"
+    "If unsure, answer neutral. Domain:"
+)
+
+
+def effective_category(domain, db_category):
+    """DB row wins (user/ai/default); otherwise built-in map; else neutral."""
+    if db_category is not None:
+        return db_category
+    return BUILTIN_SITE_CATEGORIES.get(domain, "neutral")
+
+
+def enrich_site_rows(rows):
+    for row in rows:
+        row["category"] = effective_category(row["domain"], row.get("category"))
+    return rows
+
+
+def _upsert_builtin_category(cursor, client_token, domain):
+    """Insert server default row if domain is in the built-in map; never overwrite user overrides."""
+    if domain not in BUILTIN_SITE_CATEGORIES:
+        return
+    cat = BUILTIN_SITE_CATEGORIES[domain]
+    cursor.execute(
+        """INSERT INTO site_categories (client_token, domain, category, source)
+           VALUES (%s, %s, %s, 'default')
+           ON DUPLICATE KEY UPDATE
+             category = IF(source = 'user', category, %s),
+             source = IF(source = 'user', source, 'default')""",
+        (client_token, domain, cat, cat),
+    )
+
+
 def get_db():
     return mysql.connector.connect(
         host=db_host,
@@ -374,40 +450,56 @@ def get_db():
         database=db_name
     )
 def categorize_domain(client_token, domain):
-    """Check database first for this user, then ask AI if unknown."""
+    """Per-user DB row first; else built-in list; else OpenAI."""
     conn = get_db()
-    cursor = conn.cursor(dictionary=True)
+    cur = conn.cursor(dictionary=True)
 
-    cursor.execute(
+    cur.execute(
         "SELECT category FROM site_categories WHERE client_token = %s AND domain = %s",
         (client_token, domain),
     )
-    row = cursor.fetchone()
+    row = cur.fetchone()
 
     if row:
-        cursor.close()
+        cur.close()
         conn.close()
         return row["category"]
 
+    if domain in BUILTIN_SITE_CATEGORIES:
+        cat = BUILTIN_SITE_CATEGORIES[domain]
+        cur.close()
+        cur2 = conn.cursor()
+        _upsert_builtin_category(cur2, client_token, domain)
+        conn.commit()
+        cur2.close()
+        conn.close()
+        return cat
+
+    cur.close()
     response = openai_client.chat.completions.create(
         model="gpt-4o-mini",
-        max_tokens=10,
+        max_tokens=12,
         messages=[
-            {"role": "system", "content": "Categorize this website domain as exactly one word: productive, distracting, or neutral. Productive means work, education, or professional development. Distracting means social media, entertainment, gaming, or news. Neutral means shopping, utilities, banking, or general purpose. Respond with only that one word."},
-            {"role": "user", "content": domain}
-        ]
+            {"role": "system", "content": _AI_CATEGORY_SYSTEM},
+            {"role": "user", "content": domain},
+        ],
     )
 
     category = response.choices[0].message.content.strip().lower()
-    if category not in ("productive", "distracting", "neutral"):
+    for token in ("productive", "distracting", "neutral"):
+        if token in category:
+            category = token
+            break
+    else:
         category = "neutral"
 
-    cursor.execute(
+    cur3 = conn.cursor()
+    cur3.execute(
         "INSERT INTO site_categories (client_token, domain, category, source) VALUES (%s, %s, %s, 'ai')",
         (client_token, domain, category),
     )
     conn.commit()
-    cursor.close()
+    cur3.close()
     conn.close()
     return category
 
@@ -455,10 +547,15 @@ def track():
     conn = get_db()
     cursor = conn.cursor()
 
+    tracked_domains = []
+    seen_track = set()
     for site in data["sites"]:
         domain = site.get("domain")
         seconds = site.get("seconds", 0)
         if domain and seconds > 0:
+            if domain not in seen_track:
+                seen_track.add(domain)
+                tracked_domains.append(domain)
             received_at = datetime.now()
             cursor.execute(
                 "INSERT INTO browsing_data (client_token, domain, seconds_spent, recorded_at) VALUES (%s, %s, %s, %s)",
@@ -471,6 +568,9 @@ def track():
                 (ct, domain, seconds, record_date, seconds),
             )
 
+    conn.commit()
+    for dom in tracked_domains:
+        _upsert_builtin_category(cursor, ct, dom)
     conn.commit()
     cursor.close()
     conn.close()
@@ -521,25 +621,25 @@ def stats():
     today_str = request.args.get("date", str(date.today()))
 
     cursor.execute(
-        """SELECT d.domain, d.total_seconds, COALESCE(c.category, 'neutral') as category
+        """SELECT d.domain, d.total_seconds, c.category AS category
            FROM daily_summary d
            LEFT JOIN site_categories c ON d.client_token = c.client_token AND d.domain = c.domain
            WHERE d.client_token = %s AND d.visit_date = %s
            ORDER BY d.total_seconds DESC""",
         (ct, today_str),
     )
-    today = cursor.fetchall()
+    today = enrich_site_rows(cursor.fetchall())
 
     cursor.execute(
-        """SELECT d.domain, SUM(d.total_seconds) as total_seconds, COALESCE(c.category, 'neutral') as category
+        """SELECT d.domain, SUM(d.total_seconds) AS total_seconds, MAX(c.category) AS category
            FROM daily_summary d
            LEFT JOIN site_categories c ON d.client_token = c.client_token AND d.domain = c.domain
            WHERE d.client_token = %s
-           GROUP BY d.domain, c.category
+           GROUP BY d.domain
            ORDER BY total_seconds DESC""",
         (ct,),
     )
-    all_time = cursor.fetchall()
+    all_time = enrich_site_rows(cursor.fetchall())
 
     cursor.close()
     conn.close()
@@ -645,8 +745,7 @@ def categorize_all():
 
 
 @app.route("/api/categories/update", methods=["POST"])
-@require_extension_api_key
-@require_extension_client_token
+@require_category_write
 def update_category():
     data = request.get_json()
     domain = data.get("domain")
@@ -690,14 +789,14 @@ def feedback():
     cursor = conn.cursor(dictionary=True)
 
     cursor.execute(
-        """SELECT d.domain, d.total_seconds, COALESCE(c.category, 'neutral') as category
+        """SELECT d.domain, d.total_seconds, c.category AS category
            FROM daily_summary d
            LEFT JOIN site_categories c ON d.client_token = c.client_token AND d.domain = c.domain
            WHERE d.client_token = %s AND d.visit_date = %s
            ORDER BY d.total_seconds DESC""",
         (ct, today_str),
     )
-    today = cursor.fetchall()
+    today = enrich_site_rows(cursor.fetchall())
 
     cursor.close()
     conn.close()
@@ -741,22 +840,20 @@ def anomalies():
     ct = g.client_token
     today_str = request.args.get("date", str(date.today()))
 
-    # Get today's data
     cursor.execute(
-        """SELECT d.domain, d.total_seconds, COALESCE(c.category, 'neutral') as category
+        """SELECT d.domain, d.total_seconds, c.category AS category
            FROM daily_summary d
            LEFT JOIN site_categories c ON d.client_token = c.client_token AND d.domain = c.domain
            WHERE d.client_token = %s AND d.visit_date = %s
            ORDER BY d.total_seconds DESC""",
         (ct, today_str),
     )
-    today = cursor.fetchall()
+    today = enrich_site_rows(cursor.fetchall())
 
-    # Get 7-day averages (excluding today)
     cursor.execute(
-        """SELECT d.domain, 
-                  ROUND(AVG(d.total_seconds)) as avg_seconds,
-                  COUNT(DISTINCT d.visit_date) as days_seen
+        """SELECT d.domain,
+                  ROUND(AVG(d.total_seconds)) AS avg_seconds,
+                  COUNT(DISTINCT d.visit_date) AS days_seen
            FROM daily_summary d
            WHERE d.client_token = %s
              AND d.visit_date >= DATE_SUB(%s, INTERVAL 7 DAY)
@@ -766,28 +863,29 @@ def anomalies():
     )
     averages = {row["domain"]: row for row in cursor.fetchall()}
 
-    # Get category averages
     cursor.execute(
-        """SELECT COALESCE(c.category, 'neutral') as category,
-                  ROUND(AVG(daily_total)) as avg_seconds
-           FROM (
-               SELECT d.visit_date, COALESCE(c.category, 'neutral') as category,
-                      SUM(d.total_seconds) as daily_total
-               FROM daily_summary d
-               LEFT JOIN site_categories c ON d.client_token = c.client_token AND d.domain = c.domain
-               WHERE d.client_token = %s
-                 AND d.visit_date >= DATE_SUB(%s, INTERVAL 7 DAY)
-                 AND d.visit_date < %s
-               GROUP BY d.visit_date, c.category
-           ) sub
-           LEFT JOIN site_categories c ON 1=0
-           GROUP BY category""",
+        """SELECT d.visit_date, d.domain, d.total_seconds, c.category AS category
+           FROM daily_summary d
+           LEFT JOIN site_categories c ON d.client_token = c.client_token AND d.domain = c.domain
+           WHERE d.client_token = %s
+             AND d.visit_date >= DATE_SUB(%s, INTERVAL 7 DAY)
+             AND d.visit_date < %s""",
         (ct, today_str, today_str),
     )
-    cat_avgs = {row["category"]: int(row["avg_seconds"]) for row in cursor.fetchall()}
-
+    hist = cursor.fetchall()
     cursor.close()
     conn.close()
+
+    per_day = defaultdict(lambda: {"productive": 0, "distracting": 0, "neutral": 0})
+    for row in hist:
+        cat = effective_category(row["domain"], row["category"])
+        per_day[row["visit_date"]][cat] += row["total_seconds"]
+
+    cat_avgs = {}
+    if per_day:
+        n = len(per_day)
+        for cat in ("productive", "distracting", "neutral"):
+            cat_avgs[cat] = int(sum(per_day[d][cat] for d in per_day) / n)
 
     # Find anomalies
     flags = []
@@ -839,7 +937,7 @@ def weekly_report():
 
     ct = g.client_token
     cursor.execute(
-        """SELECT d.visit_date, d.domain, d.total_seconds, COALESCE(c.category, 'neutral') as category
+        """SELECT d.visit_date, d.domain, d.total_seconds, c.category AS category
            FROM daily_summary d
            LEFT JOIN site_categories c ON d.client_token = c.client_token AND d.domain = c.domain
            WHERE d.client_token = %s
@@ -847,7 +945,7 @@ def weekly_report():
            ORDER BY d.visit_date ASC, d.total_seconds DESC""",
         (ct,),
     )
-    rows = cursor.fetchall()
+    rows = enrich_site_rows(cursor.fetchall())
 
     cursor.close()
     conn.close()

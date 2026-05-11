@@ -212,6 +212,21 @@
         .site-badge.distracting { background: rgba(255,45,85,0.12); color: var(--red); border: 1px solid rgba(255,45,85,0.25); }
         .site-badge.neutral { background: rgba(255,184,0,0.12); color: var(--amber); border: 1px solid rgba(255,184,0,0.25); }
         .site-time { font-size: 11px; font-weight: 600; color: #aaa; flex-shrink: 0; text-align: right; min-width: 52px; }
+        .cat-select {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 9px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            padding: 4px 6px;
+            border-radius: 3px;
+            border: 1px solid var(--glass-border);
+            background: rgba(0,0,0,0.35);
+            color: var(--text);
+            cursor: pointer;
+            flex-shrink: 0;
+            max-width: 110px;
+        }
+        .cat-select:focus { outline: none; border-color: var(--purple); }
         .chart-container { position: relative; height: 260px; }
         .loading { color: var(--muted); font-style: italic; text-align: center; padding: 20px; font-size: 12px; }
 
@@ -469,27 +484,58 @@
         );
     }
 
-    async function fetchJson(url) {
-        const r = await fetch(url);
+    async function fetchJson(url, options) {
+        const r = await fetch(url, options);
         const data = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+        if (!r.ok) throw new Error(data.error || data.hint || `HTTP ${r.status}`);
         return data;
+    }
+
+    async function postCategory(domain, category) {
+        return fetchJson("/api/categories/update", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ domain, category }),
+        });
     }
 
     function createSiteRow(site, index, maxSeconds) {
         const pct = Math.round((site.total_seconds / maxSeconds) * 100);
         const cls = getCategoryClass(site.category);
+        const cat = site.category || "neutral";
         const div = document.createElement("div");
         div.className = "site-row";
         div.innerHTML = `
             <span class="rank">${index + 1}</span>
             <div class="bar-wrap">
-                <div class="domain-name">${site.domain}</div>
+                <div class="domain-name"></div>
                 <div class="bar-track"><div class="bar-fill ${cls}" style="width:${pct}%"></div></div>
             </div>
-            <span class="site-badge ${site.category || 'neutral'}">${site.category || 'neutral'}</span>
+            <span class="site-badge ${cat}">${cat}</span>
+            <select class="cat-select" aria-label="Change category"></select>
             <span class="site-time">${formatTime(site.total_seconds)}</span>
         `;
+        div.querySelector(".domain-name").textContent = site.domain;
+        const sel = div.querySelector(".cat-select");
+        ["productive", "neutral", "distracting"].forEach((c) => {
+            const o = document.createElement("option");
+            o.value = c;
+            o.textContent = c;
+            if (c === cat) o.selected = true;
+            sel.appendChild(o);
+        });
+        sel.addEventListener("change", async () => {
+            const next = sel.value;
+            sel.disabled = true;
+            try {
+                await postCategory(site.domain, next);
+                window.location.reload();
+            } catch (e) {
+                sel.disabled = false;
+                alert("Could not save category: " + e.message);
+            }
+        });
         return div;
     }
 

@@ -5,6 +5,10 @@ let startTime = null;
 let isIdle = false;
 let isWindowFocused = true;
 
+/** Ignore sub-second WINDOW_ID_NONE flicker (multi-monitor, overlays, DevTools edge cases). */
+let focusLossTimer = null;
+const FOCUS_LOSS_DEBOUNCE_MS = 450;
+
 const TRACKING_STATE_KEY = "trackingState";
 const CLIENT_TOKEN_KEY = "clientToken";
 
@@ -140,8 +144,11 @@ function getDomain(url) {
       !url ||
       url.startsWith("chrome://") ||
       url.startsWith("chrome-extension://") ||
+      url.startsWith("chrome-devtools://") ||
+      url.startsWith("devtools://") ||
       url.startsWith("about:") ||
-      url.startsWith("edge://")
+      url.startsWith("edge://") ||
+      url.startsWith("view-source:")
     ) {
       return null;
     }
@@ -203,6 +210,10 @@ function saveElapsed() {
   });
 }
 
+function shouldAccumulateTime() {
+  return isWindowFocused && !isIdle;
+}
+
 function switchToSite(url) {
   if (!url) return;
   const domain = getDomain(url);
@@ -213,7 +224,8 @@ function switchToSite(url) {
   saveElapsed();
 
   currentSite = domain;
-  startTime = Date.now();
+  // Only run the stopwatch while Chrome has a normal window focused (see onFocusChanged).
+  startTime = shouldAccumulateTime() ? Date.now() : null;
   console.log("Now tracking:", domain);
   saveTrackingState();
 }
@@ -229,43 +241,77 @@ function pauseTracking(reason) {
 
 function resumeTracking() {
   if (!currentSite) return;
+  if (!shouldAccumulateTime()) return;
   if (startTime) return; // already running
   startTime = Date.now();
   console.log("Tracking resumed on:", currentSite);
   saveTrackingState();
 }
 
+function cancelScheduledFocusLoss() {
+  if (focusLossTimer !== null) {
+    clearTimeout(focusLossTimer);
+    focusLossTimer = null;
+  }
+}
+
+function scheduleFocusLossPause() {
+  cancelScheduledFocusLoss();
+  focusLossTimer = setTimeout(() => {
+    focusLossTimer = null;
+    isWindowFocused = false;
+    saveTrackingState();
+    pauseTracking("window lost focus");
+  }, FOCUS_LOSS_DEBOUNCE_MS);
+}
+
 // ─── Tab events ──────────────────────────────────────────────────────────────
+// Always follow the active tab's URL so currentSite matches Gmail, etc., even if
+// window-focus events were flaky. The stopwatch only runs when shouldAccumulateTime().
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
-  if (isIdle || !isWindowFocused) return;
+  if (isIdle) return;
   chrome.tabs.get(activeInfo.tabId, (tab) => {
     if (tab && tab.url) switchToSite(tab.url);
   });
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (isIdle || !isWindowFocused) return;
+  if (isIdle) return;
   if (changeInfo.status === "complete" && tab.active && tab.url) {
     switchToSite(tab.url);
   }
 });
 
 // ─── Window focus ─────────────────────────────────────────────────────────────
-// Use a short debounce so rapidly alt-tabbing back doesn't wipe data
+// Debounce WINDOW_ID_NONE so brief focus loss doesn't discard sub-second slices.
+// When DevTools opens in its own window, focusing it pauses time without corrupting currentSite.
 
 chrome.windows.onFocusChanged.addListener((windowId) => {
   if (windowId === chrome.windows.WINDOW_ID_NONE) {
-    isWindowFocused = false;
-    saveTrackingState();
-    // Strict attention: only count when Chrome is focused.
-    pauseTracking("window lost focus");
-  } else {
+    scheduleFocusLossPause();
+    return;
+  }
+
+  cancelScheduledFocusLoss();
+
+  chrome.windows.get(windowId, { populate: false }, (win) => {
+    if (chrome.runtime.lastError || !win) return;
+
+    // DevTools / extension panels: not "attention on page" — pause but keep currentSite as-is.
+    if (win.type !== "normal" && win.type !== "app") {
+      isWindowFocused = false;
+      saveTrackingState();
+      pauseTracking(
+        win.type === "devtools" ? "DevTools focused" : `window type ${win.type}`
+      );
+      return;
+    }
+
     isWindowFocused = true;
     saveTrackingState();
 
     if (!isIdle) {
-      // Re-detect which site we're on
       chrome.tabs.query({ active: true, windowId: windowId }, (tabs) => {
         if (tabs[0] && tabs[0].url) {
           const domain = getDomain(tabs[0].url);
@@ -276,7 +322,7 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
         }
       });
     }
-  }
+  });
 });
 
 // ─── Idle detection ───────────────────────────────────────────────────────────
@@ -455,7 +501,7 @@ chrome.runtime.onSuspend.addListener(() => {
 
 function initTrackingFromActiveTab() {
   restoreTrackingState(() => {
-    if (isIdle || !isWindowFocused) return;
+    if (isIdle || !shouldAccumulateTime()) return;
     if (currentSite && startTime) return;
     chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
       if (tabs[0] && tabs[0].url) {
