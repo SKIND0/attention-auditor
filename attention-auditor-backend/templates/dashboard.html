@@ -93,46 +93,31 @@
 
         .stat-strip {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
+            grid-template-columns: repeat(5, minmax(0, 1fr));
             gap: 1px;
             background: var(--glass-border);
             border: 1px solid var(--glass-border);
             border-radius: 4px;
-            margin-bottom: 16px;
+            margin-bottom: 32px;
             overflow: hidden;
         }
-        .category-details {
-            margin-bottom: 32px;
-            border: 1px solid var(--glass-border);
-            border-radius: 4px;
-            background: var(--glass-bg);
+        @media (max-width: 980px) {
+            .stat-strip {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
         }
-        .category-details summary {
-            cursor: pointer;
-            padding: 12px 18px;
-            font-size: 10px;
-            letter-spacing: 0.18em;
-            text-transform: uppercase;
-            color: var(--muted);
-            list-style: none;
-        }
-        .category-details summary::-webkit-details-marker { display: none; }
-        .category-details summary::after {
-            content: ' +';
-            color: var(--purple);
-        }
-        .category-details[open] summary::after { content: ' −'; }
-        .category-details .stat-strip-inner {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 1px;
-            background: var(--glass-border);
-            border-top: 1px solid var(--glass-border);
+        @media (max-width: 520px) {
+            .stat-strip {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
         }
         .stat-cell {
             background: var(--glass-bg);
             backdrop-filter: blur(12px);
-            padding: 20px 24px;
+            padding: 16px 14px;
+        }
+        @media (min-width: 981px) {
+            .stat-cell { padding: 18px 12px; }
         }
         .stat-cell::before {
             content: attr(data-label);
@@ -144,9 +129,10 @@
             margin-bottom: 8px;
         }
         .stat-cell .val {
-            font-size: 28px;
+            font-size: clamp(18px, 2.2vw, 26px);
             font-weight: 600;
             line-height: 1;
+            word-break: break-word;
         }
         .stat-cell .val.green { color: var(--green); }
         .stat-cell .val.red { color: var(--red); }
@@ -240,24 +226,8 @@
         .site-badge.distracting { background: rgba(255,45,85,0.12); color: var(--red); border: 1px solid rgba(255,45,85,0.25); }
         .site-badge.neutral { background: rgba(255,184,0,0.12); color: var(--amber); border: 1px solid rgba(255,184,0,0.25); }
         .site-time { font-size: 11px; font-weight: 600; color: #aaa; flex-shrink: 0; text-align: right; min-width: 52px; }
-        .cat-select {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 9px;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
-            padding: 4px 6px;
-            border-radius: 3px;
-            border: 1px solid var(--glass-border);
-            background: rgba(0,0,0,0.35);
-            color: var(--text);
-            cursor: pointer;
-            flex-shrink: 0;
-            max-width: 110px;
-        }
-        .cat-select:focus { outline: none; border-color: var(--purple); }
-        /* Simplified list: hide labels & dropdowns until user opts in */
-        #siteList:not(.show-categories) .site-badge,
-        #siteList:not(.show-categories) .cat-select {
+        /* Simplified list: hide category badges until user opts in (editing is footer-only). */
+        #siteList:not(.show-categories) .site-badge {
             display: none !important;
         }
         #siteList:not(.show-categories) .bar-fill.green,
@@ -304,6 +274,106 @@
             color: var(--muted);
             max-width: 520px;
             line-height: 1.5;
+        }
+        .label-editor-panel {
+            display: none;
+            margin-top: 18px;
+            padding: 20px;
+            border: 1px solid var(--glass-border);
+            border-radius: 6px;
+            background: rgba(0,0,0,0.28);
+            max-width: 640px;
+        }
+        .label-editor-panel.visible { display: block; }
+        .label-editor-panel h3 {
+            font-family: 'Playfair Display', serif;
+            font-size: 13px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #fff;
+            margin-bottom: 10px;
+        }
+        .label-editor-panel p.small {
+            font-size: 10px;
+            color: var(--muted);
+            line-height: 1.55;
+            margin-bottom: 16px;
+        }
+        .label-editor-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            gap: 12px;
+        }
+        .label-editor-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .label-editor-field label {
+            font-size: 9px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+        .label-editor-field input,
+        .label-editor-field select {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            padding: 10px 12px;
+            border-radius: 4px;
+            border: 1px solid var(--glass-border);
+            background: rgba(0,0,0,0.45);
+            color: var(--text);
+            min-width: 200px;
+        }
+        .label-editor-field input:focus,
+        .label-editor-field select:focus {
+            outline: none;
+            border-color: var(--purple);
+        }
+        .label-editor-submit {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            padding: 12px 22px;
+            border-radius: 4px;
+            border: 1px solid var(--purple);
+            background: transparent;
+            color: var(--purple);
+            cursor: pointer;
+        }
+        .label-editor-submit:hover { background: rgba(184,127,255,0.12); }
+        .label-editor-submit:disabled { opacity: 0.45; cursor: not-allowed; }
+        .label-editor-msg {
+            margin-top: 14px;
+            font-size: 11px;
+            min-height: 1.4em;
+        }
+        .label-editor-msg.ok { color: var(--green); }
+        .label-editor-msg.err { color: var(--red); }
+        .footer-inline {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 14px;
+            margin-top: 14px;
+        }
+        .footer-checkbox {
+            font-size: 10px;
+            letter-spacing: 0.06em;
+            color: var(--muted);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .footer-checkbox input {
+            accent-color: var(--purple);
+            width: 14px;
+            height: 14px;
         }
         .chart-container { position: relative; height: 260px; }
         .loading { color: var(--muted); font-style: italic; text-align: center; padding: 20px; font-size: 12px; }
@@ -446,16 +516,10 @@
 <div class="stat-strip">
     <div class="stat-cell" data-label="Total tracked"><div class="val white cursor" id="totalTime">--</div></div>
     <div class="stat-cell" data-label="Sites visited"><div class="val white" id="siteCount">--</div></div>
+    <div class="stat-cell" data-label="Productive"><div class="val green" id="productiveTime">--</div></div>
+    <div class="stat-cell" data-label="Distracting"><div class="val red" id="distractingTime">--</div></div>
+    <div class="stat-cell" data-label="Neutral"><div class="val amber" id="neutralTime">--</div></div>
 </div>
-
-<details class="category-details">
-    <summary>Time by category (productive / distracting / neutral)</summary>
-    <div class="stat-strip-inner">
-        <div class="stat-cell" data-label="Productive"><div class="val green" id="productiveTime">--</div></div>
-        <div class="stat-cell" data-label="Distracting"><div class="val red" id="distractingTime">--</div></div>
-        <div class="stat-cell" data-label="Neutral"><div class="val amber" id="neutralTime">--</div></div>
-    </div>
-</details>
 
 <div class="grid">
 
@@ -532,14 +596,42 @@
 
 <footer class="page-footer">
     <div class="footer-actions">
-        <button type="button" class="footer-btn" id="toggleCategoryEdit" aria-expanded="false">
+        <button type="button" class="footer-btn" id="toggleCategoryEdit" aria-expanded="false" aria-controls="labelEditorPanel">
             Edit site labels & categories
         </button>
         <a class="footer-out" href="/logout">Log out</a>
     </div>
     <p class="footer-hint" id="categoryEditHint">
-        Tip: labeling is hidden until you turn it on here, so the main list stays clean. Use the menu on each row to fix Railway, GitHub, etc. if you disagree with the default.
+        Category badges stay off the breakdown list until you choose—no accidental taps next to a site row. Overrides happen down here only.
     </p>
+    <div class="label-editor-panel" id="labelEditorPanel" aria-hidden="true">
+        <h3>Label override</h3>
+        <p class="small">
+            Type the exact domain shown in Today’s breakdown (e.g. <code>github.com</code>). This updates your personal category without scrolling or reloading the page.
+        </p>
+        <div class="label-editor-row">
+            <div class="label-editor-field">
+                <label for="overrideDomain">Domain</label>
+                <input id="overrideDomain" type="text" placeholder="example.com" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="label-editor-field">
+                <label for="overrideCategory">Category</label>
+                <select id="overrideCategory">
+                    <option value="productive">productive</option>
+                    <option value="neutral">neutral</option>
+                    <option value="distracting">distracting</option>
+                </select>
+            </div>
+            <button type="button" class="label-editor-submit" id="overrideSave">Save override</button>
+        </div>
+        <div class="label-editor-msg" id="overrideMsg" aria-live="polite"></div>
+        <div class="footer-inline">
+            <label class="footer-checkbox">
+                <input type="checkbox" id="toggleShowBadges">
+                <span>Show category badges beside each site</span>
+            </label>
+        </div>
+    </div>
 </footer>
 
 </div>
@@ -596,6 +688,28 @@
         });
     }
 
+    /** Chart instances refreshed when categories change — avoids full reload / scroll jump */
+    let barChartInstance = null;
+
+    function destroyBarChart() {
+        if (barChartInstance) {
+            barChartInstance.destroy();
+            barChartInstance = null;
+        }
+    }
+
+    function normalizeDomainInput(raw) {
+        const s = String(raw || "").trim();
+        if (!s) return "";
+        try {
+            const withProto = s.includes("://") ? s : "https://" + s;
+            const u = new URL(withProto);
+            return (u.hostname || "").toLowerCase();
+        } catch (_) {
+            return s.split("/")[0].split("?")[0].trim().toLowerCase();
+        }
+    }
+
     function createSiteRow(site, index, maxSeconds) {
         const pct = Math.round((site.total_seconds / maxSeconds) * 100);
         const cls = getCategoryClass(site.category);
@@ -609,30 +723,171 @@
                 <div class="bar-track"><div class="bar-fill ${cls}" style="width:${pct}%"></div></div>
             </div>
             <span class="site-badge ${cat}">${cat}</span>
-            <select class="cat-select" aria-label="Change category"></select>
             <span class="site-time">${formatTime(site.total_seconds)}</span>
         `;
         div.querySelector(".domain-name").textContent = site.domain;
-        const sel = div.querySelector(".cat-select");
-        ["productive", "neutral", "distracting"].forEach((c) => {
-            const o = document.createElement("option");
-            o.value = c;
-            o.textContent = c;
-            if (c === cat) o.selected = true;
-            sel.appendChild(o);
-        });
-        sel.addEventListener("change", async () => {
-            const next = sel.value;
-            sel.disabled = true;
-            try {
-                await postCategory(site.domain, next);
-                window.location.reload();
-            } catch (e) {
-                sel.disabled = false;
-                alert("Could not save category: " + e.message);
-            }
-        });
         return div;
+    }
+
+    function badgesShouldShow() {
+        const cb = document.getElementById("toggleShowBadges");
+        return Boolean(cb && cb.checked);
+    }
+
+    function syncListBadgeVisibility(container) {
+        if (!container) return;
+        container.classList.toggle("show-categories", badgesShouldShow());
+    }
+
+    function renderSiteRowsInto(container, today) {
+        if (!container) return;
+        container.innerHTML = "";
+        syncListBadgeVisibility(container);
+
+        if (today.length === 0) {
+            container.innerHTML = '<p class="loading">No data recorded yet today</p>';
+            return;
+        }
+
+        const maxSeconds = today[0].total_seconds;
+        const initial = today.slice(0, 10);
+        const rest = today.slice(10);
+
+        initial.forEach((site, i) => {
+            container.appendChild(createSiteRow(site, i, maxSeconds));
+        });
+
+        if (rest.length > 0) {
+            const hiddenDiv = document.createElement("div");
+            hiddenDiv.id = "hiddenSites";
+            hiddenDiv.style.display = "none";
+            rest.forEach((site, i) => {
+                hiddenDiv.appendChild(createSiteRow(site, i + 10, maxSeconds));
+            });
+            container.appendChild(hiddenDiv);
+
+            const btn = document.createElement("button");
+            btn.className = "show-more-btn";
+            btn.textContent = "Show " + rest.length + " more";
+            btn.onclick = function () {
+                const hidden = document.getElementById("hiddenSites");
+                if (hidden.style.display === "none") {
+                    hidden.style.display = "block";
+                    btn.textContent = "Show less";
+                } else {
+                    hidden.style.display = "none";
+                    btn.textContent = "Show " + rest.length + " more";
+                }
+            };
+            container.appendChild(btn);
+        }
+    }
+
+    function applyStatStripFromToday(today) {
+        const productive = today.filter((s) => s.category === "productive").reduce((sum, s) => sum + s.total_seconds, 0);
+        const distracting = today.filter((s) => s.category === "distracting").reduce((sum, s) => sum + s.total_seconds, 0);
+        const neutral = today.filter((s) => s.category === "neutral").reduce((sum, s) => sum + s.total_seconds, 0);
+        document.getElementById("totalTime").textContent = formatTime(productive + distracting + neutral);
+        document.getElementById("productiveTime").textContent = formatTime(productive);
+        document.getElementById("distractingTime").textContent = formatTime(distracting);
+        document.getElementById("neutralTime").textContent = formatTime(neutral);
+        document.getElementById("siteCount").textContent = today.length;
+    }
+
+    function renderBarChart(allTime) {
+        destroyBarChart();
+        if (!allTime || allTime.length === 0) return;
+
+        const top10 = allTime.slice(0, 10);
+        barChartInstance = new Chart(document.getElementById("barChart"), {
+            type: "bar",
+            data: {
+                labels: top10.map((s) => s.domain),
+                datasets: [
+                    {
+                        data: top10.map((s) => Number(s.total_seconds)),
+                        backgroundColor: top10.map((s) => getCategoryColor(s.category) + "33"),
+                        borderColor: top10.map((s) => getCategoryColor(s.category)),
+                        borderWidth: 1,
+                        borderRadius: 3,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        ticks: { color: "#5a6070", callback: (val) => formatTime(val) },
+                        grid: { color: "rgba(255,255,255,0.04)" },
+                    },
+                    x: { ticks: { color: "#888" }, grid: { display: false } },
+                },
+                plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => formatTime(ctx.raw) } } },
+            },
+        });
+    }
+
+    function renderAnomalyPanel(data) {
+        const container = document.getElementById("anomalyList");
+        if (!container) return;
+        container.innerHTML = "";
+        const flags = data.flags || [];
+
+        if (flags.length === 0) {
+            container.innerHTML =
+                '<div class="anomaly-flag none"><span class="icon">&#10003;</span> Nothing unusual today. Browsing patterns are within normal range.</div>';
+        } else {
+            flags.forEach((flag) => {
+                const icons = {
+                    alert: "&#9888;",
+                    warning: "&#9671;",
+                    positive: "&#9650;",
+                    info: "&#8505;",
+                };
+                const div = document.createElement("div");
+                div.className = "anomaly-flag " + flag.type;
+                div.innerHTML = '<span class="icon">' + (icons[flag.type] || "&#8226;") + "</span> " + flag.message;
+                container.appendChild(div);
+            });
+        }
+
+        const comp = document.createElement("div");
+        comp.className = "anomaly-comparison";
+        comp.innerHTML =
+            "<div>Today productive: <span class=\"val\">" +
+            formatTime(data.productive_today) +
+            "</span></div>" +
+            "<div>Avg productive: <span class=\"val\">" +
+            formatTime(data.productive_avg) +
+            "</span></div>" +
+            "<div>Today distracting: <span class=\"val\">" +
+            formatTime(data.distracting_today) +
+            "</span></div>" +
+            "<div>Avg distracting: <span class=\"val\">" +
+            formatTime(data.distracting_avg) +
+            "</span></div>";
+        container.appendChild(comp);
+    }
+
+    /** After a footer override: refresh aggregates + list without reload while keeping scroll */
+    async function refreshAfterCategoryChange() {
+        const y = window.scrollY;
+        const data = await fetchJson("/api/stats?date=" + encodeURIComponent(todayDate));
+        const today = filterJunk(data.today || []);
+        const allTime = filterJunk(data.all_time || []);
+
+        const list = document.getElementById("siteList");
+        renderSiteRowsInto(list, today);
+        applyStatStripFromToday(today);
+        renderBarChart(allTime);
+
+        try {
+            const an = await fetchJson("/api/anomalies?date=" + encodeURIComponent(todayDate));
+            renderAnomalyPanel(an);
+        } catch (_) {}
+
+        window.requestAnimationFrame(() => window.scrollTo(0, y));
     }
 
     function switchTab(tab, btn) {
@@ -665,129 +920,85 @@
     Chart.defaults.color = '#5a6070';
     Chart.defaults.font = { family: "'IBM Plex Mono', monospace", size: 11 };
 
-    (function () {
-        const btn = document.getElementById("toggleCategoryEdit");
-        const list = document.getElementById("siteList");
+    (function initFooterCategoryTools() {
+        const toggleBtn = document.getElementById("toggleCategoryEdit");
+        const panel = document.getElementById("labelEditorPanel");
         const hint = document.getElementById("categoryEditHint");
-        if (!btn || !list) return;
-        btn.addEventListener("click", () => {
-            const on = !list.classList.contains("show-categories");
-            list.classList.toggle("show-categories", on);
-            btn.setAttribute("aria-expanded", on ? "true" : "false");
-            btn.textContent = on ? "Hide category labels" : "Edit site labels & categories";
-            if (hint) hint.style.display = on ? "none" : "";
-        });
+        const list = document.getElementById("siteList");
+        const badgeCb = document.getElementById("toggleShowBadges");
+        const saveBtn = document.getElementById("overrideSave");
+        const domainIn = document.getElementById("overrideDomain");
+        const catSel = document.getElementById("overrideCategory");
+        const msgEl = document.getElementById("overrideMsg");
+
+        if (toggleBtn && panel) {
+            toggleBtn.addEventListener("click", () => {
+                const open = !panel.classList.contains("visible");
+                panel.classList.toggle("visible", open);
+                panel.setAttribute("aria-hidden", open ? "false" : "true");
+                toggleBtn.setAttribute("aria-expanded", open ? "true" : "false");
+                toggleBtn.textContent = open ? "Close label editor" : "Edit site labels & categories";
+                if (hint) hint.style.display = open ? "none" : "";
+            });
+        }
+
+        if (badgeCb && list) {
+            badgeCb.addEventListener("change", () => {
+                syncListBadgeVisibility(list);
+            });
+        }
+
+        if (domainIn && saveBtn) {
+            domainIn.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") saveBtn.click();
+            });
+        }
+
+        if (saveBtn && domainIn && catSel && msgEl) {
+            saveBtn.addEventListener("click", async () => {
+                const domainRaw = normalizeDomainInput(domainIn.value);
+                if (!domainRaw) {
+                    msgEl.textContent = "Enter a domain (e.g. github.com).";
+                    msgEl.className = "label-editor-msg err";
+                    return;
+                }
+                msgEl.textContent = "";
+                msgEl.className = "label-editor-msg";
+                saveBtn.disabled = true;
+                try {
+                    await postCategory(domainRaw, catSel.value);
+                    msgEl.textContent = 'Saved "' + domainRaw + '" as ' + catSel.value + ".";
+                    msgEl.className = "label-editor-msg ok";
+                    await refreshAfterCategoryChange();
+                } catch (e) {
+                    msgEl.textContent = "Could not save: " + e.message;
+                    msgEl.className = "label-editor-msg err";
+                } finally {
+                    saveBtn.disabled = false;
+                }
+            });
+        }
     })();
 
     fetchJson("/api/stats?date=" + encodeURIComponent(todayDate))
-        .then(data => {
+        .then((data) => {
             const today = filterJunk(data.today || []);
             const allTime = filterJunk(data.all_time || []);
             const container = document.getElementById("siteList");
-            container.innerHTML = "";
 
-            if (today.length === 0) {
-                container.innerHTML = '<p class="loading">No data recorded yet today</p>';
-            } else {
-                const maxSeconds = today[0].total_seconds;
-                const initial = today.slice(0, 10);
-                const rest = today.slice(10);
-
-                initial.forEach((site, i) => {
-                    container.appendChild(createSiteRow(site, i, maxSeconds));
-                });
-
-                if (rest.length > 0) {
-                    const hiddenDiv = document.createElement("div");
-                    hiddenDiv.id = "hiddenSites";
-                    hiddenDiv.style.display = "none";
-                    rest.forEach((site, i) => {
-                        hiddenDiv.appendChild(createSiteRow(site, i + 10, maxSeconds));
-                    });
-                    container.appendChild(hiddenDiv);
-
-                    const btn = document.createElement("button");
-                    btn.className = "show-more-btn";
-                    btn.textContent = "Show " + rest.length + " more";
-                    btn.onclick = function() {
-                        const hidden = document.getElementById("hiddenSites");
-                        if (hidden.style.display === "none") {
-                            hidden.style.display = "block";
-                            btn.textContent = "Show less";
-                        } else {
-                            hidden.style.display = "none";
-                            btn.textContent = "Show " + rest.length + " more";
-                        }
-                    };
-                    container.appendChild(btn);
-                }
-            }
-
-            let productive = today.filter(s => s.category === "productive").reduce((sum, s) => sum + s.total_seconds, 0);
-            let distracting = today.filter(s => s.category === "distracting").reduce((sum, s) => sum + s.total_seconds, 0);
-            let neutral = today.filter(s => s.category === "neutral").reduce((sum, s) => sum + s.total_seconds, 0);
-
-            document.getElementById("totalTime").textContent = formatTime(productive + distracting + neutral);
-            document.getElementById("productiveTime").textContent = formatTime(productive);
-            document.getElementById("distractingTime").textContent = formatTime(distracting);
-            document.getElementById("neutralTime").textContent = formatTime(neutral);
-            document.getElementById("siteCount").textContent = today.length;
-
-            if (allTime.length > 0) {
-                const top10 = allTime.slice(0, 10);
-                new Chart(document.getElementById("barChart"), {
-                    type: "bar",
-                    data: {
-                        labels: top10.map(s => s.domain),
-                        datasets: [{
-                            data: top10.map(s => Number(s.total_seconds)),
-                            backgroundColor: top10.map(s => getCategoryColor(s.category) + '33'),
-                            borderColor: top10.map(s => getCategoryColor(s.category)),
-                            borderWidth: 1, borderRadius: 3
-                        }]
-                    },
-                    options: {
-                        responsive: true, maintainAspectRatio: false,
-                        scales: {
-                            y: { ticks: { color: "#5a6070", callback: val => formatTime(val) }, grid: { color: "rgba(255,255,255,0.04)" } },
-                            x: { ticks: { color: "#888" }, grid: { display: false } }
-                        },
-                        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => formatTime(ctx.raw) } } }
-                    }
-                });
-            }
+            renderSiteRowsInto(container, today);
+            applyStatStripFromToday(today);
+            renderBarChart(allTime);
         })
-        .catch(() => { document.getElementById("siteList").innerHTML = '<p class="loading">Could not load data</p>'; });
+        .catch(() => {
+            document.getElementById("siteList").innerHTML = '<p class="loading">Could not load data</p>';
+        });
 
     fetchJson("/api/anomalies?date=" + encodeURIComponent(todayDate))
-        .then(data => {
-            const container = document.getElementById("anomalyList");
-            container.innerHTML = "";
-            const flags = data.flags || [];
-
-            if (flags.length === 0) {
-                container.innerHTML = '<div class="anomaly-flag none"><span class="icon">&#10003;</span> Nothing unusual today. Browsing patterns are within normal range.</div>';
-            } else {
-                flags.forEach(flag => {
-                    const icons = { alert: "&#9888;", warning: "&#9671;", positive: "&#9650;", info: "&#8505;" };
-                    const div = document.createElement("div");
-                    div.className = "anomaly-flag " + flag.type;
-                    div.innerHTML = '<span class="icon">' + (icons[flag.type] || "&#8226;") + '</span> ' + flag.message;
-                    container.appendChild(div);
-                });
-            }
-
-            const comp = document.createElement("div");
-            comp.className = "anomaly-comparison";
-            comp.innerHTML = `
-                <div>Today productive: <span class="val">${formatTime(data.productive_today)}</span></div>
-                <div>Avg productive: <span class="val">${formatTime(data.productive_avg)}</span></div>
-                <div>Today distracting: <span class="val">${formatTime(data.distracting_today)}</span></div>
-                <div>Avg distracting: <span class="val">${formatTime(data.distracting_avg)}</span></div>
-            `;
-            container.appendChild(comp);
-        })
-        .catch(() => { document.getElementById("anomalyList").innerHTML = '<p class="loading">Could not load anomalies</p>'; });
+        .then(renderAnomalyPanel)
+        .catch(() => {
+            document.getElementById("anomalyList").innerHTML = '<p class="loading">Could not load anomalies</p>';
+        });
 
     fetchJson("/api/stats/weekly")
         .then(weekly => {
