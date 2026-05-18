@@ -9,20 +9,15 @@ const CLIENT_TOKEN_KEY = "clientToken";
 
 // ─── Helper: find the active tab (works in MV3 service workers) ─────────────
 function getActiveTab(callback) {
-  console.log("[getActiveTab] Trying lastFocusedWindow...");
   chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
     if (tabs && tabs.length > 0) {
-      console.log("[getActiveTab] Found via lastFocusedWindow:", tabs[0].url);
       callback(tabs[0]);
       return;
     }
-    console.log("[getActiveTab] lastFocusedWindow empty, trying all active tabs...");
     chrome.tabs.query({ active: true }, (allTabs) => {
       if (allTabs && allTabs.length > 0) {
-        console.log("[getActiveTab] Found via all active:", allTabs[0].url);
         callback(allTabs[0]);
       } else {
-        console.log("[getActiveTab] No active tabs found at all!");
         callback(null);
       }
     });
@@ -34,12 +29,10 @@ function ensureClientToken(callback) {
   chrome.storage.local.get([CLIENT_TOKEN_KEY], (r) => {
     let t = r[CLIENT_TOKEN_KEY];
     if (typeof t === "string" && /^[0-9a-f-]{36}$/i.test(t)) {
-      console.log("[ensureClientToken] Existing token:", t.substring(0, 8) + "...");
       callback(t);
       return;
     }
     t = crypto.randomUUID();
-    console.log("[ensureClientToken] Generated new token:", t.substring(0, 8) + "...");
     chrome.storage.local.set({ [CLIENT_TOKEN_KEY]: t }, () => callback(t));
   });
 }
@@ -62,9 +55,6 @@ function restoreTrackingState(cb) {
       currentSite = st.currentSite ?? currentSite;
       startTime = st.startTime ?? startTime;
       isIdle = Boolean(st.isIdle);
-      console.log("[restoreTrackingState] Restored:", { currentSite, startTime: !!startTime, isIdle });
-    } else {
-      console.log("[restoreTrackingState] No saved state found");
     }
     cb?.();
   });
@@ -72,7 +62,6 @@ function restoreTrackingState(cb) {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "flushSession") {
-    console.log("[onMessage] flushSession requested");
     saveElapsed(() => {
       if (startTime) startTime = Date.now();
       saveTrackingState();
@@ -174,7 +163,7 @@ function saveElapsed(done) {
     const siteData = result[storageKey] || {};
     siteData[currentSite] = (siteData[currentSite] || 0) + seconds;
     chrome.storage.local.set({ [storageKey]: siteData }, () => {
-      console.log(`[saveElapsed] Tracked ${seconds}s on ${currentSite} (Today total: ${siteData[currentSite]}s) [${todayKey}]`);
+      console.log(`Tracked ${seconds}s on ${currentSite} (Total: ${siteData[currentSite]}s)`);
       saveTrackingState();
       finish();
     });
@@ -183,9 +172,7 @@ function saveElapsed(done) {
 
 function isActiveTabAudible(callback) {
   getActiveTab((tab) => {
-    const audible = tab && tab.audible === true;
-    console.log("[isActiveTabAudible] Tab audible:", audible, tab ? tab.url : "no tab");
-    callback(audible);
+    callback(tab && tab.audible === true);
   });
 }
 
@@ -196,22 +183,18 @@ function shouldAccumulateTime() {
 function switchToSite(url) {
   if (!url) return;
   const domain = getDomain(url);
-  if (!domain) {
-    console.log("[switchToSite] Filtered out:", url);
-    return;
-  }
+  if (!domain) return;
   if (domain === currentSite) return;
 
   saveElapsed();
   currentSite = domain;
   startTime = shouldAccumulateTime() ? Date.now() : null;
-  console.log("[switchToSite] Now tracking:", domain, startTime ? "(running)" : "(paused - idle)");
+  console.log("Now tracking:", domain);
   saveTrackingState();
 }
 
 function pauseTracking(reason) {
   if (!currentSite) return;
-  console.log(`[pauseTracking] Paused: ${reason}`);
   saveElapsed();
   startTime = null;
   saveTrackingState();
@@ -219,39 +202,25 @@ function pauseTracking(reason) {
 
 function resumeTracking() {
   if (!currentSite) return;
-  if (!shouldAccumulateTime()) {
-    console.log("[resumeTracking] Can't resume - idle:", isIdle);
-    return;
-  }
+  if (!shouldAccumulateTime()) return;
   if (startTime) return;
   startTime = Date.now();
-  console.log("[resumeTracking] Resumed on:", currentSite);
   saveTrackingState();
 }
 
 // ─── Tab events ──────────────────────────────────────────────────────────────
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
-  console.log("[onActivated] Tab changed, tabId:", activeInfo.tabId, "isIdle:", isIdle);
   if (isIdle) return;
   chrome.tabs.get(activeInfo.tabId, (tab) => {
-    if (chrome.runtime.lastError) {
-      console.log("[onActivated] Error getting tab:", chrome.runtime.lastError.message);
-      return;
-    }
-    if (tab && tab.url) {
-      console.log("[onActivated] Tab URL:", tab.url);
-      switchToSite(tab.url);
-    } else {
-      console.log("[onActivated] Tab has no URL yet");
-    }
+    if (chrome.runtime.lastError) return;
+    if (tab && tab.url) switchToSite(tab.url);
   });
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (isIdle) return;
   if (changeInfo.status === "complete" && tab.active && tab.url) {
-    console.log("[onUpdated] Page loaded:", tab.url);
     switchToSite(tab.url);
   }
 });
@@ -261,30 +230,26 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 chrome.idle.setDetectionInterval(60);
 
 chrome.idle.onStateChanged.addListener((state) => {
-  console.log("[idle] State changed:", state);
   if (state === "idle" || state === "locked") {
     isActiveTabAudible((audible) => {
       if (audible) {
-        console.log("[idle] System idle but MEDIA PLAYING — continuing to track");
+        console.log("System idle but media playing — continuing to track");
         return;
       }
-      console.log("[idle] No media playing — pausing tracking");
+      console.log("Idle detected — pausing tracking");
       isIdle = true;
       pauseTracking(`user ${state}`);
     });
   } else if (state === "active") {
-    console.log("[idle] User is back — resuming");
+    console.log("User active — resuming tracking");
     isIdle = false;
     getActiveTab((tab) => {
       if (tab && tab.url) {
         const domain = getDomain(tab.url);
-        console.log("[idle] Active tab on resume:", domain);
         if (domain) {
           if (domain !== currentSite) currentSite = domain;
           resumeTracking();
         }
-      } else {
-        console.log("[idle] No active tab found on resume");
       }
     });
     saveTrackingState();
@@ -310,7 +275,6 @@ function pruneOldDays() {
     }
     if (keysToRemove.length > 0) {
       chrome.storage.local.remove(keysToRemove);
-      console.log("[pruneOldDays] Removed:", keysToRemove);
     }
   });
 }
@@ -350,12 +314,7 @@ function sendToServer() {
           .filter(([, secs]) => secs > 0)
           .map(([domain, seconds]) => ({ domain, seconds }));
 
-        if (sites.length === 0) {
-          console.log("[sendToServer] Nothing new to send");
-          return;
-        }
-
-        console.log("[sendToServer] Sending", sites.length, "sites to", trackUrl);
+        if (sites.length === 0) return;
 
         chrome.storage.local.set({
           lastSyncUrl: trackUrl,
@@ -381,7 +340,7 @@ function sendToServer() {
             return payload;
           })
           .then((data) => {
-            console.log("[sendToServer] SUCCESS:", data);
+            console.log("Synced to server successfully");
             chrome.storage.local.set({
               [lastSentKey]: todayData,
               [pendingDeltaKey]: {},
@@ -391,7 +350,7 @@ function sendToServer() {
             pruneOldDays();
           })
           .catch((err) => {
-            console.log("[sendToServer] FAILED:", err.message);
+            console.log("Sync failed, will retry:", err.message);
             chrome.storage.local.set({
               [pendingDeltaKey]: mergedToSend,
               lastSyncError: String(err?.message || err || "Unknown error"),
@@ -409,56 +368,38 @@ chrome.alarms.create("sendData", { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "sendData") {
     restoreTrackingState(() => {
-      console.log("[alarm] Tick — currentSite:", currentSite, "startTime:", !!startTime, "isIdle:", isIdle);
       if (!isIdle) {
         saveElapsed();
         if (startTime) startTime = Date.now();
       }
       saveTrackingState();
-      console.log("[alarm] Sending data...");
       sendToServer();
     });
   }
 });
 
 chrome.runtime.onSuspend.addListener(() => {
-  console.log("[onSuspend] Saving state before suspension");
   try { saveElapsed(); } finally { saveTrackingState(); }
 });
 
 function initTrackingFromActiveTab() {
   restoreTrackingState(() => {
-    console.log("[init] State after restore:", { currentSite, startTime: !!startTime, isIdle });
-    if (isIdle) {
-      console.log("[init] User is idle, not starting tracking");
-      return;
-    }
-    if (currentSite && startTime) {
-      console.log("[init] Already tracking:", currentSite);
-      return;
-    }
-    console.log("[init] Need to find active tab...");
+    if (isIdle) return;
+    if (currentSite && startTime) return;
     getActiveTab((tab) => {
       if (tab && tab.url) {
         const domain = getDomain(tab.url);
-        console.log("[init] Found active tab:", domain, "url:", tab.url);
-        if (!domain) {
-          console.log("[init] Domain filtered out, not tracking");
-          return;
-        }
+        if (!domain) return;
         currentSite = domain;
         startTime = Date.now();
-        console.log("[init] Started tracking:", domain);
         saveTrackingState();
-      } else {
-        console.log("[init] No active tab found — tracking will start on first tab switch");
       }
     });
   });
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log("[onInstalled] Extension installed/refreshed");
+  console.log("Extension installed/refreshed");
   ensureClientToken(() => {
     initTrackingFromActiveTab();
     sendToServer();
@@ -466,7 +407,7 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  console.log("[onStartup] Browser started");
+  console.log("Browser started");
   ensureClientToken(() => {
     initTrackingFromActiveTab();
     sendToServer();
