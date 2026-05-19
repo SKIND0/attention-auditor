@@ -170,6 +170,15 @@ With `FLASK_DEBUG=1`, it prompts for MySQL password and OpenAI key if env vars a
 3. Go to `http://localhost:5000/login` → paste the Device ID → submit
 4. Optional: set **Server URL** in the popup if not using the default
 
+
+
+### Using the Dashboard
+
+Once logged in, the dashboard shows your browsing data with charts and AI features. At the bottom of the page:
+
+- **Label Editor** — Click "Open Label Editor" to change any site's category. Type the domain (e.g., `github.com`), select productive/distracting/neutral, and click Save Override. Your personal label is applied immediately without reloading.
+- **Log Out** — Click "Log Out" to end your session. Use this to switch to a different Device ID on the same computer.
+
 ---
 
 ## Deploying on Railway
