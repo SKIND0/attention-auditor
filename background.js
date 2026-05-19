@@ -368,12 +368,28 @@ chrome.alarms.create("sendData", { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "sendData") {
     restoreTrackingState(() => {
-      if (!isIdle) {
+      chrome.idle.queryState(60, (state) => {
+        if (state === "locked" || state === "idle") {
+          if (!isIdle) {
+            console.log("Alarm detected system is " + state + " — pausing");
+            isIdle = true;
+            isActiveTabAudible((audible) => {
+              if (!audible) {
+                pauseTracking("system " + state + " (detected on alarm tick)");
+              }
+            });
+          }
+          saveTrackingState();
+          sendToServer();
+          return;
+        }
+
+        isIdle = false;
         saveElapsed();
         if (startTime) startTime = Date.now();
-      }
-      saveTrackingState();
-      sendToServer();
+        saveTrackingState();
+        sendToServer();
+      });
     });
   }
 });
