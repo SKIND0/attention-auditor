@@ -15,334 +15,414 @@
       --bg: #f7f4f0;
       --card-bg: #fffdfb;
       --card-border: #e8e2db;
-      --card-shadow: 0 4px 20px rgba(61, 54, 48, 0.06);
+      --card-shadow: 0 4px 24px rgba(61, 54, 48, 0.06);
       --text: #3d3630;
       --muted: #8a7f75;
       --accent: #6b8fa8;
-      --accent-hover: #567a94;
       --productive: #5a9a6f;
-      --widget-bg: #f3efe8;
+      --distracting: #c47d7d;
+      --neutral: #b8956a;
+      --track: #ebe6df;
       --wash-mint: #eef6f0;
+      --wash-lavender: #f5f3fa;
       --wash-blush: #faf3f4;
     }
     [data-theme="dark"] {
       --bg: #1f1c19;
       --card-bg: #2a2622;
       --card-border: #3d3832;
-      --card-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+      --card-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
       --text: #f5f0e8;
       --muted: #a89f94;
       --accent: #8ab4c7;
-      --accent-hover: #9fc3d4;
       --productive: #7eb892;
-      --widget-bg: #242019;
+      --distracting: #d49292;
+      --neutral: #d4b87a;
+      --track: #3d3832;
       --wash-mint: #2a322e;
+      --wash-lavender: #2c2a32;
       --wash-blush: #322a2c;
-      --accent-mint: #6a8f7a;
-      --accent-blush: #8a7078;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { color-scheme: light dark; }
     body {
-      width: 360px;
-      padding: 16px;
+      width: 380px;
+      max-height: 580px;
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       background: var(--bg);
       color: var(--text);
       -webkit-font-smoothing: antialiased;
-      transition: background 0.25s ease, color 0.2s ease;
     }
-    .phone-shell {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 24px;
-      padding: 16px;
+    [data-theme="light"] body {
+      background-image:
+        radial-gradient(ellipse 80% 50% at 0% 0%, rgba(183, 220, 200, 0.18), transparent 55%),
+        radial-gradient(ellipse 70% 45% at 100% 0%, rgba(220, 190, 210, 0.14), transparent 50%);
+    }
+    .popup {
+      padding: 14px 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-height: 580px;
+    }
+    .masthead {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+    }
+    .logo {
+      width: 36px;
+      height: 36px;
+      border-radius: 11px;
+      flex-shrink: 0;
       box-shadow: var(--card-shadow);
     }
-    .header {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      margin-bottom: 14px;
-      padding-bottom: 14px;
-      border-bottom: 1px solid var(--card-border);
-    }
-    .header .logo {
-      width: 32px;
-      height: 32px;
-      border-radius: 10px;
-      flex: 0 0 auto;
-    }
-    .header-text { flex: 1; min-width: 0; }
-    h1 {
-      font-size: 15px;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      color: var(--text);
-    }
-    .subtitle {
+    .masthead-text { flex: 1; min-width: 0; }
+    .edition {
       font-size: 10px;
-      font-weight: 500;
+      font-weight: 600;
       color: var(--muted);
-      margin-top: 2px;
+      letter-spacing: 0.04em;
+    }
+    .masthead h1 {
+      font-size: 17px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
     }
     .theme-toggle {
-      font-family: inherit;
-      font-size: 10px;
-      font-weight: 600;
-      padding: 6px 10px;
+      font: 600 11px/1 inherit;
+      padding: 7px 12px;
       border-radius: 999px;
       border: 1px solid var(--card-border);
-      background: var(--widget-bg);
+      background: var(--card-bg);
       color: var(--muted);
       cursor: pointer;
+      box-shadow: var(--card-shadow);
       flex-shrink: 0;
-      white-space: nowrap;
     }
     .theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
+
     .widget-strip {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(3, 1fr);
       gap: 8px;
-      margin-bottom: 12px;
     }
     .widget {
-      position: relative;
+      background: var(--card-bg);
       border: 1px solid var(--card-border);
       border-radius: 16px;
-      padding: 12px;
+      padding: 10px 11px;
+      box-shadow: var(--card-shadow);
+      position: relative;
       overflow: hidden;
     }
-    [data-theme="light"] .widget:first-child { background: var(--wash-mint); }
-    [data-theme="light"] .widget:last-child { background: var(--wash-blush); }
-    [data-theme="dark"] .widget { background: var(--card-bg); }
-    [data-theme="dark"] .widget::after {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 2px;
-      opacity: 0.85;
-    }
-    [data-theme="dark"] .widget:first-child::after { background: var(--accent-mint); }
-    [data-theme="dark"] .widget:last-child::after { background: var(--accent-blush); }
+    [data-theme="light"] .widget:nth-child(1) { background: var(--wash-lavender); }
+    [data-theme="light"] .widget:nth-child(2) { background: var(--wash-mint); }
+    [data-theme="light"] .widget:nth-child(3) { background: var(--wash-blush); }
     .widget-label {
-      font-size: 10px;
+      font-size: 9px;
       font-weight: 600;
       color: var(--muted);
-      margin-bottom: 4px;
+      margin-bottom: 3px;
     }
     .widget-value {
       font-family: 'IBM Plex Mono', ui-monospace, monospace;
-      font-size: 15px;
+      font-size: 13px;
       font-weight: 600;
-      color: var(--productive);
       letter-spacing: -0.02em;
+      line-height: 1.2;
+      word-break: break-word;
     }
-    .site {
+    .widget-value.accent { color: var(--productive); }
+    .widget-value.ok { color: var(--productive); }
+    .widget-value.warn { color: var(--neutral); }
+    .widget-value.muted { color: var(--muted); font-size: 11px; }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      box-shadow: var(--card-shadow);
+      overflow: hidden;
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .card-header {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 10px 12px;
-      margin-bottom: 6px;
-      background: var(--widget-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      transition: opacity 0.15s;
+      justify-content: space-between;
+      padding: 12px 14px 10px;
+      border-bottom: 1px solid var(--card-border);
     }
-    .site:hover { opacity: 0.92; }
+    .card-header h2 {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .card-header .tag {
+      font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      font-size: 9px;
+      font-weight: 500;
+      color: var(--muted);
+    }
+    .site-list {
+      padding: 8px 10px 10px;
+      overflow-y: auto;
+      max-height: 240px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--muted) transparent;
+    }
+    .site-list::-webkit-scrollbar { width: 5px; }
+    .site-list::-webkit-scrollbar-thumb {
+      background: var(--muted);
+      border-radius: 999px;
+      opacity: 0.4;
+    }
+    .site-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 8px 6px;
+      border-radius: 12px;
+      transition: background 0.12s;
+    }
+    .site-row:hover { background: color-mix(in srgb, var(--track) 55%, transparent); }
     .rank {
       font-family: 'IBM Plex Mono', ui-monospace, monospace;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 600;
       color: var(--muted);
-      width: 16px;
+      width: 14px;
       text-align: right;
       flex-shrink: 0;
     }
-    .domain {
-      font-size: 13px;
-      font-weight: 600;
+    .bar-wrap {
       flex: 1;
       min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .domain {
+      font-size: 12px;
+      font-weight: 600;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .time {
+    .bar-track {
+      height: 5px;
+      background: var(--track);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--accent) 70%, var(--track));
+      transition: width 0.35s ease;
+    }
+    .bar-fill.productive { background: color-mix(in srgb, var(--productive) 78%, var(--track)); }
+    .bar-fill.distracting { background: color-mix(in srgb, var(--distracting) 78%, var(--track)); }
+    .bar-fill.neutral { background: color-mix(in srgb, var(--neutral) 78%, var(--track)); }
+    .site-time {
       font-family: 'IBM Plex Mono', ui-monospace, monospace;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text);
-      flex-shrink: 0;
-    }
-    .empty {
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--muted);
-      text-align: center;
-      padding: 20px 8px;
-    }
-    .panel {
-      margin-top: 10px;
-      padding: 12px;
-      background: var(--widget-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 16px;
-    }
-    .panel .row {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      margin-bottom: 8px;
-    }
-    .panel .row:last-child { margin-bottom: 0; }
-    .panel label,
-    .panel .label {
       font-size: 10px;
       font-weight: 600;
       color: var(--muted);
+      flex-shrink: 0;
+      min-width: 48px;
+      text-align: right;
     }
-    .panel .value {
+    .empty {
+      padding: 28px 16px;
+      text-align: center;
       font-size: 12px;
-      font-weight: 600;
-      color: var(--text);
-      word-break: break-word;
+      font-weight: 500;
+      color: var(--muted);
+      line-height: 1.5;
     }
-    .panel input {
+
+    .footer-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .btn {
+      flex: 1;
+      font: 700 12px/1 inherit;
+      padding: 11px 14px;
+      border-radius: 12px;
+      border: none;
+      cursor: pointer;
+      text-align: center;
+      text-decoration: none;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary {
+      background: var(--accent);
+      color: #fffdfb;
+    }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-ghost {
+      background: var(--card-bg);
+      color: var(--accent);
+      border: 1px solid var(--card-border);
+      box-shadow: var(--card-shadow);
+      flex: 0 0 auto;
+      padding: 11px 14px;
+    }
+
+    details.settings {
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      background: var(--card-bg);
+      box-shadow: var(--card-shadow);
+    }
+    details.settings summary {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      padding: 10px 12px;
+      cursor: pointer;
+      list-style: none;
+      user-select: none;
+    }
+    details.settings summary::-webkit-details-marker { display: none; }
+    details.settings summary::after {
+      content: ' ▾';
+      float: right;
+      opacity: 0.6;
+    }
+    details.settings[open] summary::after { content: ' ▴'; }
+    .settings-body {
+      padding: 0 12px 12px;
+      border-top: 1px solid var(--card-border);
+    }
+    .field { margin-top: 10px; }
+    .field label {
+      display: block;
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 5px;
+    }
+    .field input {
       width: 100%;
       font-family: 'IBM Plex Mono', ui-monospace, monospace;
       font-size: 10px;
-      padding: 10px 12px;
-      border-radius: 12px;
+      padding: 9px 11px;
+      border-radius: 10px;
       border: 1px solid var(--card-border);
-      background: var(--card-bg);
+      background: var(--bg);
       color: var(--text);
-      outline: none;
     }
-    .panel input:focus { border-color: var(--accent); }
-    .panel input::placeholder { color: var(--muted); opacity: 0.7; }
+    .field input:focus { outline: none; border-color: var(--accent); }
     .hint {
       font-size: 10px;
-      font-weight: 500;
       color: var(--muted);
-      line-height: 1.4;
+      line-height: 1.45;
       margin-top: 6px;
     }
     .hint strong { color: var(--text); font-weight: 600; }
-    .actions {
+    .row-actions {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       align-items: center;
       margin-top: 8px;
     }
-    .btn {
-      font-family: inherit;
-      font-size: 11px;
-      font-weight: 700;
-      padding: 8px 14px;
-      border-radius: 12px;
+    .btn-sm {
+      font: 700 10px/1 inherit;
+      padding: 7px 12px;
+      border-radius: 10px;
       border: none;
       background: var(--accent);
       color: #fffdfb;
       cursor: pointer;
-      transition: opacity 0.15s;
     }
-    .btn:hover { opacity: 0.88; }
-    .device-actions a {
-      color: var(--accent);
-      font-size: 11px;
+    .link {
+      font-size: 10px;
       font-weight: 600;
+      color: var(--accent);
       text-decoration: none;
     }
-    .device-actions a:hover { text-decoration: underline; }
-    .section-title {
+    .link:hover { text-decoration: underline; }
+    .sync-line {
       font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
       color: var(--muted);
-      margin: 14px 0 8px;
+      margin-top: 8px;
+      line-height: 1.5;
     }
+    .sync-line span { color: var(--text); font-weight: 600; }
   </style>
 </head>
 <body>
-  <div class="phone-shell">
-    <div class="header">
-      <img class="logo" src="icon.svg" alt="Attention Auditor" />
-      <div class="header-text">
-        <h1>Attention Auditor</h1>
-        <div class="subtitle">Your browsing at a glance</div>
+  <div class="popup">
+    <header class="masthead">
+      <img class="logo" src="icon.svg" alt="" />
+      <div class="masthead-text">
+        <div class="edition">Attention Auditor</div>
+        <h1>Today</h1>
       </div>
       <button type="button" class="theme-toggle" id="themeToggle" aria-label="Switch appearance">Dark</button>
-    </div>
+    </header>
 
     <div class="widget-strip">
       <div class="widget">
-        <div class="widget-label">Total tracked</div>
-        <div class="widget-value" id="totalTime">0s</div>
+        <div class="widget-label">Total</div>
+        <div class="widget-value accent" id="totalTime">0s</div>
       </div>
       <div class="widget">
         <div class="widget-label">Focus</div>
-        <div class="widget-value" id="focusStatus" style="color: var(--text); font-size: 12px;">--</div>
+        <div class="widget-value muted" id="focusStatus">--</div>
+      </div>
+      <div class="widget">
+        <div class="widget-label">Status</div>
+        <div class="widget-value muted" id="trackingStatus">--</div>
       </div>
     </div>
 
-    <div id="sites"></div>
+    <section class="card">
+      <div class="card-header">
+        <h2>Sites</h2>
+        <span class="tag" id="siteCountTag">Live</span>
+      </div>
+      <div class="site-list" id="sites">
+        <p class="empty">Loading…</p>
+      </div>
+    </section>
 
-    <div class="section-title">Status</div>
-    <div class="panel" id="statusBox">
-      <div class="row">
-        <span class="label">Idle</span>
-        <span class="value" id="idleStatus">--</span>
-      </div>
-      <div class="row">
-        <span class="label">Tracking</span>
-        <span class="value" id="trackingStatus">--</span>
-      </div>
+    <div class="footer-actions">
+      <a class="btn btn-primary" id="dashboardLoginLink" href="#" target="_blank" rel="noopener">Open dashboard</a>
+      <button type="button" class="btn btn-ghost" id="copyDeviceId" title="Copy device ID">Copy ID</button>
     </div>
 
-    <div class="section-title">Device</div>
-    <div class="panel">
-      <div class="row device-row">
-        <label for="deviceId">Device ID (dashboard login)</label>
-        <input id="deviceId" type="text" readonly placeholder="Saving…" />
-        <p class="hint">Each Chrome profile gets its own ID. Paste this on the server login page to see <strong>only</strong> your synced stats.</p>
-        <div class="actions device-actions">
-          <button type="button" class="btn" id="copyDeviceId">Copy ID</button>
-          <a id="dashboardLoginLink" href="#" target="_blank" rel="noopener">Dashboard login</a>
+    <details class="settings">
+      <summary>Settings & sync</summary>
+      <div class="settings-body">
+        <div class="field">
+          <label for="deviceId">Device ID</label>
+          <input id="deviceId" type="text" readonly placeholder="Saving…" />
+          <p class="hint">Paste at dashboard login — <strong>only your</strong> stats.</p>
         </div>
+        <div class="field">
+          <label for="serverUrl">Server URL</label>
+          <input id="serverUrl" placeholder="Default Railway URL if blank" />
+        </div>
+        <div class="row-actions">
+          <button type="button" class="btn-sm" id="saveSettings">Save</button>
+        </div>
+        <p class="sync-line">Idle: <span id="idleStatus">--</span></p>
+        <p class="sync-line">Last sync: <span id="lastSyncAt">--</span></p>
+        <p class="sync-line">Error: <span id="lastSyncError">--</span></p>
       </div>
-    </div>
-
-    <div class="section-title">Sync</div>
-    <div class="panel">
-      <div class="row">
-        <label for="serverUrl">Server URL</label>
-        <input id="serverUrl" placeholder="Leave blank for default Railway URL" />
-        <p class="hint">Sites and time above are always from <strong>this browser</strong> (saved locally). Sync uploads them to the server when it is reachable.</p>
-      </div>
-      <div class="actions">
-        <button class="btn" id="saveSettings">Save</button>
-      </div>
-    </div>
-
-    <div class="panel" id="syncBox" style="margin-top: 10px;">
-      <div class="row">
-        <span class="label">Last sync</span>
-        <span class="value" id="lastSyncAt">--</span>
-      </div>
-      <div class="row">
-        <span class="label">Sync URL</span>
-        <span class="value" id="lastSyncUrl">--</span>
-      </div>
-      <div class="row">
-        <span class="label">Last error</span>
-        <span class="value" id="lastSyncError">--</span>
-      </div>
-    </div>
+    </details>
   </div>
+
   <script>
     (function () {
       var btn = document.getElementById("themeToggle");
@@ -350,7 +430,6 @@
       function isDark() { return document.documentElement.getAttribute("data-theme") === "dark"; }
       function sync() {
         btn.textContent = isDark() ? "Light" : "Dark";
-        btn.setAttribute("aria-label", isDark() ? "Switch to light mode" : "Switch to dark mode");
       }
       sync();
       btn.addEventListener("click", function () {

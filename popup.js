@@ -4,6 +4,41 @@ const DEFAULT_SERVER_URL =
 const CLIENT_TOKEN_KEY = "clientToken";
 const TRACKING_STATE_KEY = "trackingState";
 
+/** Mirrors server built-ins for bar colors in the popup (neutral if unknown). */
+const POPUP_CATEGORIES = {
+  "railway.app": "productive",
+  "github.com": "productive",
+  "google.com": "neutral",
+  "mail.google.com": "productive",
+  "docs.google.com": "productive",
+  "claude.ai": "productive",
+  "chatgpt.com": "neutral",
+  "openai.com": "neutral",
+  "stackoverflow.com": "productive",
+  "youtube.com": "distracting",
+  "netflix.com": "distracting",
+  "spotify.com": "distracting",
+  "instagram.com": "distracting",
+  "facebook.com": "distracting",
+  "twitter.com": "distracting",
+  "x.com": "distracting",
+  "reddit.com": "distracting",
+  "tiktok.com": "distracting",
+  "pinterest.com": "distracting",
+  "whatsapp.com": "distracting",
+  "discord.com": "distracting",
+  "twitch.tv": "distracting",
+  "amazon.com": "neutral",
+  "wikipedia.org": "productive",
+  "notion.so": "productive",
+  "canvas.instructure.com": "productive",
+  "touro.edu": "productive",
+};
+
+function categoryForDomain(domain) {
+  return POPUP_CATEGORIES[domain] || "neutral";
+}
+
 function formatTime(seconds) {
   if (seconds < 60) return seconds + "s";
   let minutes = Math.floor(seconds / 60);
@@ -21,30 +56,42 @@ function getTodayKey() {
 
 function renderSites(sites) {
   const container = document.getElementById("sites");
+  const countTag = document.getElementById("siteCountTag");
   container.innerHTML = "";
 
   if (!sites || sites.length === 0) {
-    container.innerHTML = '<p class="empty">No data yet. Start browsing!</p>';
+    container.innerHTML =
+      '<p class="empty">No browsing logged yet today.<br>Visit a few sites with Chrome focused.</p>';
     document.getElementById("totalTime").textContent = "0s";
+    if (countTag) countTag.textContent = "0 sites";
     return;
   }
 
   sites.sort((a, b) => b.total_seconds - a.total_seconds);
-
+  const maxSeconds = sites[0].total_seconds || 1;
   let totalSeconds = 0;
+
   sites.forEach((site, index) => {
     totalSeconds += site.total_seconds;
-    const div = document.createElement("div");
-    div.className = "site";
-    div.innerHTML = `
-      <span class="rank">#${index + 1}</span>
-      <span class="domain">${site.domain}</span>
-      <span class="time">${formatTime(site.total_seconds)}</span>
+    const pct = Math.max(4, Math.round((site.total_seconds / maxSeconds) * 100));
+    const cat = categoryForDomain(site.domain);
+    const row = document.createElement("div");
+    row.className = "site-row";
+    row.innerHTML = `
+      <span class="rank">${index + 1}</span>
+      <div class="bar-wrap">
+        <div class="domain"></div>
+        <div class="bar-track"><div class="bar-fill ${cat}" style="width:${pct}%"></div></div>
+      </div>
+      <span class="site-time"></span>
     `;
-    container.appendChild(div);
+    row.querySelector(".domain").textContent = site.domain;
+    row.querySelector(".site-time").textContent = formatTime(site.total_seconds);
+    container.appendChild(row);
   });
 
   document.getElementById("totalTime").textContent = formatTime(totalSeconds);
+  if (countTag) countTag.textContent = `${sites.length} site${sites.length === 1 ? "" : "s"}`;
 }
 
 function pauseReasonLabel(reason) {
@@ -64,7 +111,7 @@ function renderStatus(trackingState) {
   const idleEl = document.getElementById("idleStatus");
   const trackingEl = document.getElementById("trackingStatus");
 
-  if (!focusEl || !idleEl || !trackingEl) return;
+  if (!focusEl || !trackingEl) return;
 
   const v2 = trackingState?.schemaVersion === 2;
   const chromeFocused = v2
@@ -75,26 +122,47 @@ function renderStatus(trackingState) {
   const isRunning = v2 ? trackingState.isRunning : Boolean(trackingState?.startTime);
   const pauseReason = trackingState?.pauseReason;
 
-  focusEl.textContent =
-    chromeFocused === undefined ? "--" : chromeFocused ? "Focused" : "Unfocused";
-
-  if (isIdle === undefined) {
-    idleEl.textContent = "--";
-  } else if (isIdle && trackingState?.focusedWindowHasAudible && trackingState?.osIdleState === "idle") {
-    idleEl.textContent = "Watching (idle override)";
+  focusEl.className = "widget-value";
+  if (chromeFocused === undefined) {
+    focusEl.textContent = "--";
+    focusEl.classList.add("muted");
+  } else if (chromeFocused) {
+    focusEl.textContent = "Yes";
+    focusEl.classList.add("ok");
   } else {
-    idleEl.textContent = isIdle ? "Idle" : "Active";
+    focusEl.textContent = "No";
+    focusEl.classList.add("warn");
   }
 
+  if (idleEl) {
+    if (isIdle === undefined) {
+      idleEl.textContent = "--";
+    } else if (
+      isIdle &&
+      trackingState?.focusedWindowHasAudible &&
+      trackingState?.osIdleState === "idle"
+    ) {
+      idleEl.textContent = "Watching";
+    } else {
+      idleEl.textContent = isIdle ? "Away" : "Active";
+    }
+  }
+
+  trackingEl.className = "widget-value";
   if (!currentSite) {
-    trackingEl.textContent = "--";
+    trackingEl.textContent = "—";
+    trackingEl.classList.add("muted");
     return;
   }
 
   if (isRunning) {
-    trackingEl.textContent = `${currentSite} (counting)`;
+    trackingEl.textContent = "Counting";
+    trackingEl.classList.add("ok");
+    trackingEl.title = currentSite;
   } else {
-    trackingEl.textContent = `${currentSite} (${pauseReasonLabel(pauseReason)})`;
+    trackingEl.textContent = pauseReasonLabel(pauseReason);
+    trackingEl.classList.add("warn");
+    trackingEl.title = currentSite;
   }
 }
 
@@ -107,13 +175,13 @@ function formatDateTime(ms) {
 
 function renderSync(sync) {
   const atEl = document.getElementById("lastSyncAt");
-  const urlEl = document.getElementById("lastSyncUrl");
   const errEl = document.getElementById("lastSyncError");
-  if (!atEl || !urlEl || !errEl) return;
+  if (!atEl) return;
 
-  atEl.textContent = sync?.lastSyncAt ? formatDateTime(sync.lastSyncAt) : "--";
-  urlEl.textContent = sync?.lastSyncUrl || "--";
-  errEl.textContent = sync?.lastSyncError ? sync.lastSyncError : "None";
+  atEl.textContent = sync?.lastSyncAt ? formatDateTime(sync.lastSyncAt) : "Never";
+  if (errEl) {
+    errEl.textContent = sync?.lastSyncError ? sync.lastSyncError : "None";
+  }
 }
 
 function normalizeServerUrl(input) {
@@ -136,6 +204,7 @@ function renderDevicePanel(result) {
   tokenEl.value = typeof tok === "string" ? tok : "";
   const base = effectiveServerBase(result);
   linkEl.href = `${base}/login`;
+  linkEl.textContent = "Open dashboard";
 }
 
 function initSettingsUI() {
