@@ -1,77 +1,38 @@
-console.log("BACKGROUND SCRIPT LOADED");
+/**
+ * Attention Auditor — background service worker (MV3)
+ * Version A: track time only when Chrome is focused, OS is active (or media
+ * exception in focused window), and the active tab is a normal website.
+ */
+console.log("BACKGROUND SCRIPT LOADED (tracking v2)");
 
-let currentSite = null;
-let startTime = null;
-let isIdle = false;
+// ─── Config ───────────────────────────────────────────────────────────────────
 
 const TRACKING_STATE_KEY = "trackingState";
 const CLIENT_TOKEN_KEY = "clientToken";
+const SCHEMA_VERSION = 2;
+const IDLE_DETECTION_SEC = 60;
+const HEARTBEAT_ALARM = "heartbeat";
+const HEARTBEAT_PERIOD_MIN = 1; // Chrome minimum for repeating alarms
+const MAX_SLICE_SEC = 90; // safety cap per commit (sleep / suspended worker)
+const STALE_SEGMENT_MS = 2 * 60 * 1000;
 
-// ─── Helper: find the active tab (works in MV3 service workers) ─────────────
-function getActiveTab(callback) {
-  chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-    if (tabs && tabs.length > 0) {
-      callback(tabs[0]);
-      return;
-    }
-    chrome.tabs.query({ active: true }, (allTabs) => {
-      if (allTabs && allTabs.length > 0) {
-        callback(allTabs[0]);
-      } else {
-        callback(null);
-      }
-    });
-  });
-}
+// ─── In-memory session ────────────────────────────────────────────────────────
 
-/** One UUID per browser profile — identifies this user on the shared Railway backend. */
-function ensureClientToken(callback) {
-  chrome.storage.local.get([CLIENT_TOKEN_KEY], (r) => {
-    let t = r[CLIENT_TOKEN_KEY];
-    if (typeof t === "string" && /^[0-9a-f-]{36}$/i.test(t)) {
-      callback(t);
-      return;
-    }
-    t = crypto.randomUUID();
-    chrome.storage.local.set({ [CLIENT_TOKEN_KEY]: t }, () => callback(t));
-  });
-}
+const session = {
+  chromeFocused: false,
+  osIdleState: "active",
+  focusedWindowId: null,
+  activeTabId: null,
+  activeTabUrl: null,
+  focusedWindowHasAudible: false,
+};
 
-function saveTrackingState() {
-  chrome.storage.local.set({
-    [TRACKING_STATE_KEY]: {
-      currentSite,
-      startTime,
-      isIdle,
-      savedAt: Date.now(),
-    },
-  });
-}
+/** @type {{ domain: string, startedAt: number, lastHeartbeatAt: number } | null} */
+let openSegment = null;
+let pauseReason = null;
 
-function restoreTrackingState(cb) {
-  chrome.storage.local.get([TRACKING_STATE_KEY], (result) => {
-    const st = result[TRACKING_STATE_KEY];
-    if (st) {
-      currentSite = st.currentSite ?? currentSite;
-      startTime = st.startTime ?? startTime;
-      isIdle = Boolean(st.isIdle);
-    }
-    cb?.();
-  });
-}
+// ─── Domain helpers ─────────────────────────────────────────────────────────
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.type === "flushSession") {
-    saveElapsed(() => {
-      if (startTime) startTime = Date.now();
-      saveTrackingState();
-      sendResponse({ ok: true });
-    });
-    return true;
-  }
-});
-
-// Subdomains that should be kept distinct instead of merged to root domain
 const KEEP_SUBDOMAIN = new Set([
   "mail.google.com",
   "docs.google.com",
@@ -144,119 +105,291 @@ function getTodayKey() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function saveElapsed(done) {
-  const finish = typeof done === "function" ? done : () => {};
-  if (!currentSite || !startTime) {
-    finish();
-    return;
-  }
-  const seconds = Math.round((Date.now() - startTime) / 1000);
-  if (seconds < 1) {
-    finish();
-    return;
-  }
-
-  const todayKey = getTodayKey();
-  const storageKey = `siteData_${todayKey}`;
-
-  chrome.storage.local.get([storageKey], (result) => {
-    const siteData = result[storageKey] || {};
-    siteData[currentSite] = (siteData[currentSite] || 0) + seconds;
-    chrome.storage.local.set({ [storageKey]: siteData }, () => {
-      console.log(`Tracked ${seconds}s on ${currentSite} (Total: ${siteData[currentSite]}s)`);
-      saveTrackingState();
-      finish();
-    });
-  });
+function filterJunkDomain(domain) {
+  return domain && domain !== "0.1" && domain !== "localhost" && domain !== "localhost:5000";
 }
 
-function isActiveTabAudible(callback) {
-  getActiveTab((tab) => {
-    callback(tab && tab.audible === true);
-  });
+// ─── Persistence ──────────────────────────────────────────────────────────────
+
+function buildTrackingStatePayload() {
+  const domain = openSegment?.domain ?? getDomain(session.activeTabUrl);
+  const mediaIdleOverride =
+    session.osIdleState === "idle" && session.focusedWindowHasAudible && session.chromeFocused;
+
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    openSegment: openSegment ? { ...openSegment } : null,
+    pauseReason,
+    chromeFocused: session.chromeFocused,
+    osIdleState: session.osIdleState,
+    focusedWindowId: session.focusedWindowId,
+    activeTabId: session.activeTabId,
+    focusedWindowHasAudible: session.focusedWindowHasAudible,
+    currentSite: domain || null,
+    isWindowFocused: session.chromeFocused,
+    isIdle:
+      session.osIdleState === "locked" ||
+      (session.osIdleState === "idle" && !mediaIdleOverride),
+    isRunning: Boolean(openSegment),
+    startTime: openSegment?.lastHeartbeatAt ?? null,
+    savedAt: Date.now(),
+  };
 }
 
-function shouldAccumulateTime() {
-  return !isIdle;
+function persistTrackingState(done) {
+  chrome.storage.local.set({ [TRACKING_STATE_KEY]: buildTrackingStatePayload() }, () => done?.());
 }
 
-function switchToSite(url) {
-  if (!url) return;
-  const domain = getDomain(url);
-  if (!domain) return;
-  if (domain === currentSite) return;
+function loadTrackingState(done) {
+  chrome.storage.local.get([TRACKING_STATE_KEY], (result) => {
+    const st = result[TRACKING_STATE_KEY];
+    openSegment = null;
+    pauseReason = null;
 
-  saveElapsed();
-  currentSite = domain;
-  startTime = shouldAccumulateTime() ? Date.now() : null;
-  console.log("Now tracking:", domain);
-  saveTrackingState();
-}
+    if (!st) {
+      done?.();
+      return;
+    }
 
-function pauseTracking(reason) {
-  if (!currentSite) return;
-  saveElapsed();
-  startTime = null;
-  saveTrackingState();
-}
+    if (st.schemaVersion === SCHEMA_VERSION) {
+      session.chromeFocused = Boolean(st.chromeFocused);
+      session.osIdleState = st.osIdleState || "active";
+      session.focusedWindowId = st.focusedWindowId ?? null;
+      session.activeTabId = st.activeTabId ?? null;
+      session.focusedWindowHasAudible = Boolean(st.focusedWindowHasAudible);
+      pauseReason = st.pauseReason ?? null;
 
-function resumeTracking() {
-  if (!currentSite) return;
-  if (!shouldAccumulateTime()) return;
-  if (startTime) return;
-  startTime = Date.now();
-  saveTrackingState();
-}
-
-// ─── Tab events ──────────────────────────────────────────────────────────────
-
-chrome.tabs.onActivated.addListener((activeInfo) => {
-  if (isIdle) return;
-  chrome.tabs.get(activeInfo.tabId, (tab) => {
-    if (chrome.runtime.lastError) return;
-    if (tab && tab.url) switchToSite(tab.url);
-  });
-});
-
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (isIdle) return;
-  if (changeInfo.status === "complete" && tab.active && tab.url) {
-    switchToSite(tab.url);
-  }
-});
-
-// ─── Idle detection ───────────────────────────────────────────────────────────
-
-chrome.idle.setDetectionInterval(60);
-
-chrome.idle.onStateChanged.addListener((state) => {
-  if (state === "idle" || state === "locked") {
-    isActiveTabAudible((audible) => {
-      if (audible) {
-        console.log("System idle but media playing — continuing to track");
-        return;
-      }
-      console.log("Idle detected — pausing tracking");
-      isIdle = true;
-      pauseTracking(`user ${state}`);
-    });
-  } else if (state === "active") {
-    console.log("User active — resuming tracking");
-    isIdle = false;
-    getActiveTab((tab) => {
-      if (tab && tab.url) {
-        const domain = getDomain(tab.url);
-        if (domain) {
-          if (domain !== currentSite) currentSite = domain;
-          resumeTracking();
+      if (st.openSegment?.domain && st.openSegment.lastHeartbeatAt) {
+        const age = Date.now() - st.openSegment.lastHeartbeatAt;
+        if (age <= STALE_SEGMENT_MS) {
+          openSegment = {
+            domain: st.openSegment.domain,
+            startedAt: st.openSegment.startedAt || st.openSegment.lastHeartbeatAt,
+            lastHeartbeatAt: st.openSegment.lastHeartbeatAt,
+          };
+        } else {
+          console.log("Discarded stale open segment (>2m) without crediting");
         }
       }
+      done?.();
+      return;
+    }
+
+    // v1 migration — never restore old startTime (avoid gap spikes)
+    console.log("Migrated tracking state from v1 → v2 (segment cleared)");
+    done?.();
+  });
+}
+
+function creditSeconds(domain, seconds, done) {
+  if (!filterJunkDomain(domain) || seconds < 1) {
+    done?.();
+    return;
+  }
+
+  const storageKey = `siteData_${getTodayKey()}`;
+  chrome.storage.local.get([storageKey], (result) => {
+    const siteData = result[storageKey] || {};
+    siteData[domain] = (siteData[domain] || 0) + seconds;
+    chrome.storage.local.set({ [storageKey]: siteData }, () => {
+      console.log(`+${seconds}s → ${domain} (total ${siteData[domain]}s)`);
+      done?.();
     });
-    saveTrackingState();
+  });
+}
+
+// ─── Segment / heartbeat ──────────────────────────────────────────────────────
+
+function commitSlice(finish) {
+  if (!openSegment) {
+    finish?.();
+    return;
+  }
+
+  const now = Date.now();
+  const raw = Math.round((now - openSegment.lastHeartbeatAt) / 1000);
+  const seconds = Math.max(0, Math.min(raw, MAX_SLICE_SEC));
+
+  if (seconds < 1) {
+    openSegment.lastHeartbeatAt = now;
+    finish?.();
+    return;
+  }
+
+  const domain = openSegment.domain;
+  creditSeconds(domain, seconds, () => {
+    openSegment.lastHeartbeatAt = now;
+    finish?.();
+  });
+}
+
+function flushSegment(finish) {
+  if (!openSegment) {
+    finish?.();
+    return;
+  }
+  commitSlice(() => {
+    openSegment = null;
+    finish?.();
+  });
+}
+
+function openSegmentForDomain(domain) {
+  const now = Date.now();
+  openSegment = { domain, startedAt: now, lastHeartbeatAt: now };
+  pauseReason = null;
+  console.log("Segment opened:", domain);
+}
+
+// ─── Presence & rules (Version A) ─────────────────────────────────────────────
+
+function mediaIdleException() {
+  return (
+    session.osIdleState === "idle" &&
+    session.chromeFocused &&
+    session.focusedWindowHasAudible
+  );
+}
+
+function shouldAccumulate() {
+  if (session.osIdleState === "locked") return false;
+  if (!session.chromeFocused || session.focusedWindowId == null) return false;
+
+  const domain = getDomain(session.activeTabUrl);
+  if (!domain) return false;
+
+  if (session.osIdleState === "active") return true;
+  if (mediaIdleException()) return true;
+
+  return false;
+}
+
+function derivePauseReason() {
+  if (session.osIdleState === "locked") return "locked";
+  if (!session.chromeFocused) return "unfocused";
+  if (session.osIdleState === "idle" && !mediaIdleException()) return "os_idle";
+  if (!getDomain(session.activeTabUrl)) return "untrackable";
+  if (!session.activeTabUrl) return "no_active_tab";
+  return "paused";
+}
+
+function refreshPresence(done) {
+  chrome.idle.queryState(IDLE_DETECTION_SEC, (idleState) => {
+    session.osIdleState = idleState || "active";
+
+    chrome.windows.getLastFocused({ populate: false }, (win) => {
+      if (chrome.runtime.lastError || !win?.id) {
+        session.chromeFocused = false;
+        session.focusedWindowId = null;
+        session.activeTabId = null;
+        session.activeTabUrl = null;
+        session.focusedWindowHasAudible = false;
+        done?.();
+        return;
+      }
+
+      session.chromeFocused = true;
+      session.focusedWindowId = win.id;
+
+      chrome.tabs.query({ active: true, windowId: win.id }, (tabs) => {
+        const tab = tabs?.[0];
+        session.activeTabId = tab?.id ?? null;
+        session.activeTabUrl = tab?.url ?? null;
+
+        chrome.tabs.query({ windowId: win.id, audible: true }, (audibleTabs) => {
+          session.focusedWindowHasAudible = Boolean(
+            audibleTabs?.some((t) => t.audible)
+          );
+          done?.();
+        });
+      });
+    });
+  });
+}
+
+/** Single decision point: flush, open, or pause. */
+function recompute(done) {
+  refreshPresence(() => {
+    const domain = getDomain(session.activeTabUrl);
+    const accumulating = shouldAccumulate();
+
+    if (!accumulating) {
+      if (openSegment) {
+        return flushSegment(() => {
+          pauseReason = derivePauseReason();
+          persistTrackingState(done);
+        });
+      }
+      pauseReason = derivePauseReason();
+      persistTrackingState(done);
+      return;
+    }
+
+    pauseReason = null;
+
+    if (!openSegment) {
+      openSegmentForDomain(domain);
+      persistTrackingState(done);
+      return;
+    }
+
+    if (openSegment.domain !== domain) {
+      return flushSegment(() => {
+        openSegmentForDomain(domain);
+        persistTrackingState(done);
+      });
+    }
+
+    persistTrackingState(done);
+  });
+}
+
+// ─── Client token ───────────────────────────────────────────────────────────────
+
+function ensureClientToken(callback) {
+  chrome.storage.local.get([CLIENT_TOKEN_KEY], (r) => {
+    let t = r[CLIENT_TOKEN_KEY];
+    if (typeof t === "string" && /^[0-9a-f-]{36}$/i.test(t)) {
+      callback(t);
+      return;
+    }
+    t = crypto.randomUUID();
+    chrome.storage.local.set({ [CLIENT_TOKEN_KEY]: t }, () => callback(t));
+  });
+}
+
+// ─── Messages ───────────────────────────────────────────────────────────────────
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === "flushSession") {
+    const afterFlush = () => {
+      if (shouldAccumulate()) {
+        const domain = getDomain(session.activeTabUrl);
+        if (domain) {
+          if (!openSegment || openSegment.domain !== domain) {
+            openSegmentForDomain(domain);
+          } else {
+            openSegment.lastHeartbeatAt = Date.now();
+          }
+        }
+      }
+      persistTrackingState(() => sendResponse({ ok: true, state: buildTrackingStatePayload() }));
+    };
+
+    refreshPresence(() => {
+      if (openSegment) flushSegment(afterFlush);
+      else afterFlush();
+    });
+    return true;
+  }
+
+  if (message.type === "getTrackingState") {
+    sendResponse(buildTrackingStatePayload());
+    return false;
   }
 });
 
-// ─── Daily reset ─────────────────────────────────────────────────────────────
+// ─── Server sync ────────────────────────────────────────────────────────────────
 
 function pruneOldDays() {
   chrome.storage.local.get(null, (allData) => {
@@ -273,13 +406,9 @@ function pruneOldDays() {
       const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
       if (datePart < cutoffKey) keysToRemove.push(key);
     }
-    if (keysToRemove.length > 0) {
-      chrome.storage.local.remove(keysToRemove);
-    }
+    if (keysToRemove.length > 0) chrome.storage.local.remove(keysToRemove);
   });
 }
-
-// ─── Server sync ──────────────────────────────────────────────────────────────
 
 function sendToServer() {
   ensureClientToken((clientToken) => {
@@ -301,8 +430,7 @@ function sendToServer() {
 
         const delta = {};
         for (const [domain, total] of Object.entries(todayData)) {
-          const last = lastSent[domain] || 0;
-          const diff = total - last;
+          const diff = total - (lastSent[domain] || 0);
           if (diff > 0) delta[domain] = diff;
         }
         const mergedToSend = { ...pendingDelta };
@@ -331,7 +459,11 @@ function sendToServer() {
         })
           .then(async (r) => {
             let payload = null;
-            try { payload = await r.json(); } catch { payload = null; }
+            try {
+              payload = await r.json();
+            } catch {
+              payload = null;
+            }
             if (!r.ok) {
               const msg = (payload && (payload.error || payload.message)) || `HTTP ${r.status}`;
               const hint = payload && payload.hint ? ` ${payload.hint}` : "";
@@ -339,8 +471,7 @@ function sendToServer() {
             }
             return payload;
           })
-          .then((data) => {
-            console.log("Synced to server successfully");
+          .then(() => {
             chrome.storage.local.set({
               [lastSentKey]: todayData,
               [pendingDeltaKey]: {},
@@ -350,7 +481,6 @@ function sendToServer() {
             pruneOldDays();
           })
           .catch((err) => {
-            console.log("Sync failed, will retry:", err.message);
             chrome.storage.local.set({
               [pendingDeltaKey]: mergedToSend,
               lastSyncError: String(err?.message || err || "Unknown error"),
@@ -361,71 +491,167 @@ function sendToServer() {
   });
 }
 
-// ─── Alarms ───────────────────────────────────────────────────────────────────
+// ─── Heartbeat alarm ────────────────────────────────────────────────────────────
 
-chrome.alarms.create("sendData", { periodInMinutes: 1 });
+function onHeartbeat() {
+  refreshPresence(() => {
+    const domain = getDomain(session.activeTabUrl);
 
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "sendData") {
-    restoreTrackingState(() => {
-      chrome.idle.queryState(60, (state) => {
-        if (state === "locked" || state === "idle") {
-          if (!isIdle) {
-            console.log("Alarm detected system is " + state + " — pausing");
-            isIdle = true;
-            isActiveTabAudible((audible) => {
-              if (!audible) {
-                pauseTracking("system " + state + " (detected on alarm tick)");
-              }
-            });
-          }
-          saveTrackingState();
-          sendToServer();
-          return;
+    if (shouldAccumulate() && openSegment) {
+      if (openSegment.domain !== domain) {
+        return recompute(() => sendToServer());
+      }
+      return commitSlice(() => {
+        if (!shouldAccumulate()) {
+          return flushSegment(() => {
+            pauseReason = derivePauseReason();
+            persistTrackingState(() => sendToServer());
+          });
         }
-
-        isIdle = false;
-        saveElapsed();
-        if (startTime) startTime = Date.now();
-        saveTrackingState();
-        sendToServer();
+        persistTrackingState(() => sendToServer());
       });
+    }
+
+    if (shouldAccumulate() && !openSegment && domain) {
+      return recompute(() => sendToServer());
+    }
+
+    if (openSegment) {
+      return flushSegment(() => {
+        pauseReason = derivePauseReason();
+        persistTrackingState(() => sendToServer());
+      });
+    }
+
+    pauseReason = derivePauseReason();
+    persistTrackingState(() => sendToServer());
+  });
+}
+
+// ─── Chrome listeners ───────────────────────────────────────────────────────────
+
+chrome.idle.setDetectionInterval(IDLE_DETECTION_SEC);
+
+chrome.idle.onStateChanged.addListener((state) => {
+  session.osIdleState = state;
+  if (state === "locked") {
+    return flushSegment(() => {
+      pauseReason = "locked";
+      persistTrackingState();
     });
+  }
+  recompute();
+});
+
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) {
+    session.chromeFocused = false;
+    session.focusedWindowId = null;
+    session.focusedWindowHasAudible = false;
+    return flushSegment(() => {
+      pauseReason = "unfocused";
+      persistTrackingState();
+    });
+  }
+
+  session.chromeFocused = true;
+  session.focusedWindowId = windowId;
+  recompute();
+});
+
+function onTabContextChanged(tab) {
+  if (!tab?.windowId) return;
+  if (session.focusedWindowId != null && tab.windowId !== session.focusedWindowId) return;
+  if (!tab.active) return;
+
+  session.activeTabId = tab.id ?? null;
+  session.activeTabUrl = tab.url ?? tab.pendingUrl ?? session.activeTabUrl;
+
+  chrome.tabs.query({ windowId: tab.windowId, audible: true }, (audibleTabs) => {
+    session.focusedWindowHasAudible = Boolean(audibleTabs?.some((t) => t.audible));
+    recompute();
+  });
+}
+
+chrome.tabs.onActivated.addListener((info) => {
+  chrome.tabs.get(info.tabId, (tab) => {
+    if (chrome.runtime.lastError) return;
+    onTabContextChanged(tab);
+  });
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.audible != null && tab.windowId === session.focusedWindowId) {
+    chrome.tabs.query({ windowId: tab.windowId, audible: true }, (audibleTabs) => {
+      session.focusedWindowHasAudible = Boolean(audibleTabs?.some((t) => t.audible));
+      if (tab.active) onTabContextChanged(tab);
+      else recompute();
+    });
+    return;
+  }
+  if (tabId !== session.activeTabId && !tab.active) return;
+  if (changeInfo.url || changeInfo.status === "complete") {
+    onTabContextChanged(tab);
   }
 });
 
-chrome.runtime.onSuspend.addListener(() => {
-  try { saveElapsed(); } finally { saveTrackingState(); }
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId !== session.activeTabId) return;
+  recompute();
 });
 
-function initTrackingFromActiveTab() {
-  restoreTrackingState(() => {
-    if (isIdle) return;
-    if (currentSite && startTime) return;
-    getActiveTab((tab) => {
-      if (tab && tab.url) {
-        const domain = getDomain(tab.url);
-        if (!domain) return;
-        currentSite = domain;
-        startTime = Date.now();
-        saveTrackingState();
+// ─── Lifecycle ──────────────────────────────────────────────────────────────────
+
+chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: HEARTBEAT_PERIOD_MIN });
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === HEARTBEAT_ALARM) onHeartbeat();
+});
+
+chrome.runtime.onSuspend.addListener(() => {
+  try {
+    if (openSegment) {
+      const now = Date.now();
+      const raw = Math.round((now - openSegment.lastHeartbeatAt) / 1000);
+      const seconds = Math.max(0, Math.min(raw, MAX_SLICE_SEC));
+      if (seconds >= 1) {
+        const storageKey = `siteData_${getTodayKey()}`;
+        const siteData = {};
+        siteData[openSegment.domain] = seconds;
+        chrome.storage.local.get([storageKey], (result) => {
+          const existing = result[storageKey] || {};
+          existing[openSegment.domain] = (existing[openSegment.domain] || 0) + seconds;
+          chrome.storage.local.set({
+            [storageKey]: existing,
+            [TRACKING_STATE_KEY]: buildTrackingStatePayload(),
+          });
+        });
+        return;
       }
-    });
+    }
+    persistTrackingState();
+  } catch (e) {
+    console.warn("onSuspend:", e);
+  }
+});
+
+function bootstrap() {
+  loadTrackingState(() => {
+    refreshPresence(() => recompute(() => sendToServer()));
   });
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log("Extension installed/refreshed");
-  ensureClientToken(() => {
-    initTrackingFromActiveTab();
-    sendToServer();
-  });
+  console.log("Extension installed/updated — tracking v2");
+  ensureClientToken(bootstrap);
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  console.log("Browser started");
-  ensureClientToken(() => {
-    initTrackingFromActiveTab();
-    sendToServer();
-  });
+  console.log("Browser started — tracking v2");
+  ensureClientToken(bootstrap);
+});
+
+// Service worker restarted (not always followed by onStartup)
+ensureClientToken(() => {
+  loadTrackingState(() => refreshPresence(() => recompute()));
 });

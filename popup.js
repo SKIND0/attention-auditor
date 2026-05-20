@@ -2,6 +2,7 @@ const DEFAULT_SERVER_URL =
   "https://attention-auditor-production.up.railway.app";
 
 const CLIENT_TOKEN_KEY = "clientToken";
+const TRACKING_STATE_KEY = "trackingState";
 
 function formatTime(seconds) {
   if (seconds < 60) return seconds + "s";
@@ -46,6 +47,18 @@ function renderSites(sites) {
   document.getElementById("totalTime").textContent = formatTime(totalSeconds);
 }
 
+function pauseReasonLabel(reason) {
+  const labels = {
+    locked: "Locked",
+    unfocused: "Chrome unfocused",
+    os_idle: "Away (idle)",
+    untrackable: "Not a website",
+    no_active_tab: "No tab",
+    paused: "Paused",
+  };
+  return labels[reason] || reason || "Paused";
+}
+
 function renderStatus(trackingState) {
   const focusEl = document.getElementById("focusStatus");
   const idleEl = document.getElementById("idleStatus");
@@ -53,21 +66,36 @@ function renderStatus(trackingState) {
 
   if (!focusEl || !idleEl || !trackingEl) return;
 
-  const isFocused = trackingState?.isWindowFocused;
-  const isIdle = trackingState?.isIdle;
+  const v2 = trackingState?.schemaVersion === 2;
+  const chromeFocused = v2
+    ? trackingState.chromeFocused
+    : trackingState?.isWindowFocused;
+  const isIdle = v2 ? trackingState.isIdle : trackingState?.isIdle;
   const currentSite = trackingState?.currentSite;
-  const startTime = trackingState?.startTime;
+  const isRunning = v2 ? trackingState.isRunning : Boolean(trackingState?.startTime);
+  const pauseReason = trackingState?.pauseReason;
 
-  focusEl.textContent = isFocused === undefined ? "--" : isFocused ? "Focused" : "Unfocused";
-  idleEl.textContent = isIdle === undefined ? "--" : isIdle ? "Idle" : "Active";
+  focusEl.textContent =
+    chromeFocused === undefined ? "--" : chromeFocused ? "Focused" : "Unfocused";
+
+  if (isIdle === undefined) {
+    idleEl.textContent = "--";
+  } else if (isIdle && trackingState?.focusedWindowHasAudible && trackingState?.osIdleState === "idle") {
+    idleEl.textContent = "Watching (idle override)";
+  } else {
+    idleEl.textContent = isIdle ? "Idle" : "Active";
+  }
 
   if (!currentSite) {
     trackingEl.textContent = "--";
     return;
   }
 
-  const running = Boolean(startTime);
-  trackingEl.textContent = running ? `${currentSite} (running)` : `${currentSite} (paused)`;
+  if (isRunning) {
+    trackingEl.textContent = `${currentSite} (counting)`;
+  } else {
+    trackingEl.textContent = `${currentSite} (${pauseReasonLabel(pauseReason)})`;
+  }
 }
 
 function formatDateTime(ms) {
@@ -116,7 +144,7 @@ function initSettingsUI() {
 
   if (!serverUrlInput || !saveBtn) return;
 
-    chrome.storage.local.get(["serverUrl", CLIENT_TOKEN_KEY], (result) => {
+  chrome.storage.local.get(["serverUrl", CLIENT_TOKEN_KEY], (result) => {
     serverUrlInput.value = result.serverUrl || "";
   });
 
@@ -141,7 +169,6 @@ document.getElementById("copyDeviceId")?.addEventListener("click", () => {
 });
 
 function loadAndRenderToday() {
-  // Flush open tracking into storage first, then read — otherwise the popup races and shows stale totals.
   chrome.runtime.sendMessage({ type: "flushSession" }, () => {
     if (chrome.runtime.lastError) {
       console.warn("flushSession:", chrome.runtime.lastError.message);
@@ -151,10 +178,18 @@ function loadAndRenderToday() {
     const storageKey = `siteData_${todayKey}`;
 
     chrome.storage.local.get(
-      [storageKey, "trackingState", "lastSyncAt", "lastSyncUrl", "lastSyncError", CLIENT_TOKEN_KEY, "serverUrl"],
+      [
+        storageKey,
+        TRACKING_STATE_KEY,
+        "lastSyncAt",
+        "lastSyncUrl",
+        "lastSyncError",
+        CLIENT_TOKEN_KEY,
+        "serverUrl",
+      ],
       (result) => {
         const todayData = result[storageKey] || {};
-        renderStatus(result.trackingState);
+        renderStatus(result[TRACKING_STATE_KEY]);
         renderSync({
           lastSyncAt: result.lastSyncAt,
           lastSyncUrl: result.lastSyncUrl,
@@ -175,16 +210,15 @@ function loadAndRenderToday() {
   });
 }
 
-// Render immediately on open
 loadAndRenderToday();
 initSettingsUI();
 
-// Live update while popup is open
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
   const storageKey = `siteData_${getTodayKey()}`;
   if (
     changes[storageKey] ||
+    changes[TRACKING_STATE_KEY] ||
     changes.trackingState ||
     changes.lastSyncAt ||
     changes.lastSyncUrl ||

@@ -36,9 +36,10 @@ Treat the Device ID like a password — anyone with it can view that profile's b
 - Custom domain aliases (e.g., `touro.instructure.com` → `touro.edu`)
 - Handles international TLDs (`.co.uk`, `.com.au`, etc.)
 - Filters Chrome internal pages
-- Idle detection — pauses after 60 seconds of no input
-- Window focus detection — pauses when Chrome loses focus
-- Persists tracking state to survive service worker suspension (MV3)
+- **Attention-based tracking (v2):** counts time only when Chrome is the focused app, the active tab is a normal website, and you are present (OS active). Pauses when you lock the screen, switch to another app, or go idle (~60s with no input).
+- **Movie/listen exception:** if a tab in the focused Chrome window is playing audio, idle does not pause tracking (hands off during a video is still counted).
+- Heartbeat commits every minute plus instant saves on tab/focus changes; stale sessions are not credited after sleep/overnight gaps.
+- Persists tracking state (`schemaVersion: 2`) to survive service worker suspension (MV3)
 - Stores data locally when server is unavailable, syncs when it reconnects
 - Delta-based sync — only sends new seconds, never double-counts
 
@@ -235,7 +236,8 @@ Once logged in, the dashboard shows your browsing data with charts and AI featur
 ## Known Limitations
 
 - **Active tab only** — tracks the tab you're interacting with, not all visible tabs. Passive viewing (e.g., Zoom on a second monitor) won't be fully captured.
-- **Focus detection** — tracking pauses when Chrome loses window focus. This can under-count during split-screen usage where Chrome is visible but not the active window.
+- **Focus detection** — tracking pauses when Chrome is not the OS-focused app (e.g. you are in Word or Slack). Chrome visible beside another app does not count until you focus Chrome again.
+- **Media exception** — idle (no mouse/keyboard ~60s) does not pause while a tab in the focused Chrome window is playing audio.
 - **Idle threshold** — 60 seconds of no input before pausing. Brief idle periods under 60 seconds are still counted.
 - **Timezone** — the dashboard sends the browser's local date to avoid UTC mismatch with Railway, but the weekly chart date generation may still use UTC in some edge cases.
 

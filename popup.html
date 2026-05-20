@@ -1,227 +1,366 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <title>Attention Auditor</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <script>
+    (function () {
+      var k = "aa-theme", t = localStorage.getItem(k);
+      document.documentElement.setAttribute("data-theme", t === "dark" ? "dark" : "light");
+    })();
+  </script>
   <style>
+    [data-theme="light"] {
+      --bg: #f7f4f0;
+      --card-bg: #fffdfb;
+      --card-border: #e8e2db;
+      --card-shadow: 0 4px 20px rgba(61, 54, 48, 0.06);
+      --text: #3d3630;
+      --muted: #8a7f75;
+      --accent: #6b8fa8;
+      --accent-hover: #567a94;
+      --productive: #5a9a6f;
+      --widget-bg: #f3efe8;
+      --wash-mint: #eef6f0;
+      --wash-blush: #faf3f4;
+    }
+    [data-theme="dark"] {
+      --bg: #1f1c19;
+      --card-bg: #2a2622;
+      --card-border: #3d3832;
+      --card-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+      --text: #f5f0e8;
+      --muted: #a89f94;
+      --accent: #8ab4c7;
+      --accent-hover: #9fc3d4;
+      --productive: #7eb892;
+      --widget-bg: #242019;
+      --wash-mint: #2a322e;
+      --wash-blush: #322a2c;
+      --accent-mint: #6a8f7a;
+      --accent-blush: #8a7078;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      width: 350px;
-      padding: 20px;
-      font-family: 'Segoe UI', Arial, sans-serif;
-      background-color: #1a1a2e;
-      color: #e0e0e0;
-      margin: 0;
+      width: 360px;
+      padding: 16px;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      transition: background 0.25s ease, color 0.2s ease;
+    }
+    .phone-shell {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 24px;
+      padding: 16px;
+      box-shadow: var(--card-shadow);
     }
     .header {
       display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 15px;
-      padding-bottom: 12px;
-      border-bottom: 2px solid #16213e;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 14px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--card-border);
     }
     .header .logo {
-      width: 28px;
-      height: 28px;
-      border-radius: 6px;
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
       flex: 0 0 auto;
     }
+    .header-text { flex: 1; min-width: 0; }
     h1 {
-      font-size: 18px;
-      margin: 0;
-      color: #7f5af0;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text);
     }
     .subtitle {
-      font-size: 11px;
-      color: #666;
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--muted);
       margin-top: 2px;
+    }
+    .theme-toggle {
+      font-family: inherit;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--card-border);
+      background: var(--widget-bg);
+      color: var(--muted);
+      cursor: pointer;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+    .theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
+    .widget-strip {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .widget {
+      position: relative;
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 12px;
+      overflow: hidden;
+    }
+    [data-theme="light"] .widget:first-child { background: var(--wash-mint); }
+    [data-theme="light"] .widget:last-child { background: var(--wash-blush); }
+    [data-theme="dark"] .widget { background: var(--card-bg); }
+    [data-theme="dark"] .widget::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      opacity: 0.85;
+    }
+    [data-theme="dark"] .widget:first-child::after { background: var(--accent-mint); }
+    [data-theme="dark"] .widget:last-child::after { background: var(--accent-blush); }
+    .widget-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .widget-value {
+      font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--productive);
+      letter-spacing: -0.02em;
     }
     .site {
       display: flex;
-      justify-content: space-between;
       align-items: center;
+      gap: 10px;
       padding: 10px 12px;
       margin-bottom: 6px;
-      background-color: #16213e;
-      border-radius: 8px;
-      transition: background-color 0.2s;
+      background: var(--widget-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      transition: opacity 0.15s;
     }
-    .site:hover {
-      background-color: #1f2b47;
-    }
+    .site:hover { opacity: 0.92; }
     .rank {
-      color: #7f5af0;
-      font-weight: bold;
-      margin-right: 10px;
-      font-size: 14px;
+      font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      width: 16px;
+      text-align: right;
+      flex-shrink: 0;
     }
     .domain {
+      font-size: 13px;
       font-weight: 600;
-      font-size: 14px;
-      flex-grow: 1;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .time {
-      color: #2cb67d;
-      font-weight: bold;
-      font-size: 14px;
+      font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      flex-shrink: 0;
     }
     .empty {
-      color: #555;
-      font-style: italic;
-      text-align: center;
-      padding: 20px;
-    }
-    .footer {
-      margin-top: 12px;
-      padding-top: 10px;
-      border-top: 1px solid #16213e;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .total {
       font-size: 12px;
-      color: #888;
+      font-weight: 500;
+      color: var(--muted);
+      text-align: center;
+      padding: 20px 8px;
     }
-    .total span {
-      color: #2cb67d;
-      font-weight: bold;
-    }
-    .status {
+    .panel {
       margin-top: 10px;
-      padding: 10px 12px;
-      background-color: rgba(22, 33, 62, 0.6);
-      border: 1px solid rgba(22, 33, 62, 0.9);
-      border-radius: 8px;
-      font-size: 11px;
-      color: #9aa0aa;
+      padding: 12px;
+      background: var(--widget-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+    }
+    .panel .row {
       display: flex;
       flex-direction: column;
       gap: 4px;
+      margin-bottom: 8px;
     }
-    .status .label {
-      color: #666;
-      letter-spacing: 0.02em;
-    }
-    .status .value {
-      color: #e0e0e0;
+    .panel .row:last-child { margin-bottom: 0; }
+    .panel label,
+    .panel .label {
+      font-size: 10px;
       font-weight: 600;
+      color: var(--muted);
+    }
+    .panel .value {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
       word-break: break-word;
     }
-    .settings {
-      margin-top: 10px;
-      padding: 10px 12px;
-      background-color: rgba(22, 33, 62, 0.6);
-      border: 1px solid rgba(22, 33, 62, 0.9);
-      border-radius: 8px;
-      font-size: 11px;
-      color: #9aa0aa;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .settings .row {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    .settings label {
-      color: #666;
+    .panel input {
+      width: 100%;
+      font-family: 'IBM Plex Mono', ui-monospace, monospace;
       font-size: 10px;
-      letter-spacing: 0.02em;
-    }
-    .settings input {
-      font-family: 'Segoe UI', Arial, sans-serif;
-      font-size: 12px;
-      padding: 8px 10px;
-      border-radius: 6px;
-      border: 1px solid rgba(255,255,255,0.12);
-      background: rgba(0,0,0,0.25);
-      color: #e0e0e0;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--card-border);
+      background: var(--card-bg);
+      color: var(--text);
       outline: none;
     }
-    .settings input::placeholder {
-      color: rgba(224,224,224,0.35);
-    }
-    .settings .actions {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-    }
-    .btn {
-      font-family: 'Segoe UI', Arial, sans-serif;
-      font-size: 11px;
-      padding: 7px 10px;
-      border-radius: 6px;
-      border: 1px solid rgba(255,255,255,0.12);
-      background: rgba(127, 90, 240, 0.16);
-      color: #e0e0e0;
-      cursor: pointer;
-    }
-    .btn:hover { background: rgba(127, 90, 240, 0.24); }
+    .panel input:focus { border-color: var(--accent); }
+    .panel input::placeholder { color: var(--muted); opacity: 0.7; }
     .hint {
       font-size: 10px;
-      color: #666;
-      line-height: 1.3;
+      font-weight: 500;
+      color: var(--muted);
+      line-height: 1.4;
+      margin-top: 6px;
     }
-    .device-row input {
-      font-family: ui-monospace, monospace;
-      font-size: 10px;
-    }
-    .device-actions {
+    .hint strong { color: var(--text); font-weight: 600; }
+    .actions {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       align-items: center;
       margin-top: 8px;
     }
-    .device-actions a {
-      color: #7f5af0;
+    .btn {
+      font-family: inherit;
       font-size: 11px;
+      font-weight: 700;
+      padding: 8px 14px;
+      border-radius: 12px;
+      border: none;
+      background: var(--accent);
+      color: #fffdfb;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.88; }
+    .device-actions a {
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .device-actions a:hover { text-decoration: underline; }
+    .section-title {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 14px 0 8px;
     }
   </style>
 </head>
 <body>
-  <div class="header">
-    <img class="logo" src="icon.svg" alt="Attention Auditor logo" />
-    <div>
-      <h1>Attention Auditor</h1>
-      <div class="subtitle">watching you watch the internet</div>
+  <div class="phone-shell">
+    <div class="header">
+      <img class="logo" src="icon.svg" alt="Attention Auditor" />
+      <div class="header-text">
+        <h1>Attention Auditor</h1>
+        <div class="subtitle">Your browsing at a glance</div>
+      </div>
+      <button type="button" class="theme-toggle" id="themeToggle" aria-label="Switch appearance">Dark</button>
     </div>
-  </div>
-  <div id="sites"></div>
-  <div class="footer">
-    <div class="total">Total tracked: <span id="totalTime">0s</span></div>
-  </div>
-  <div class="status" id="statusBox">
-    <div><span class="label">Focus</span>: <span class="value" id="focusStatus">--</span></div>
-    <div><span class="label">Idle</span>: <span class="value" id="idleStatus">--</span></div>
-    <div><span class="label">Tracking</span>: <span class="value" id="trackingStatus">--</span></div>
-  </div>
-  <div class="settings">
-    <div class="row device-row">
-      <label for="deviceId">Your device ID (for dashboard login)</label>
-      <input id="deviceId" type="text" readonly placeholder="Saving…" />
-      <div class="hint">Each Chrome profile gets its own ID. Paste this on the server login page to see <strong>only</strong> your synced stats.</div>
-      <div class="device-actions">
-        <button type="button" class="btn" id="copyDeviceId">Copy ID</button>
-        <a id="dashboardLoginLink" href="#" target="_blank" rel="noopener">Dashboard login</a>
+
+    <div class="widget-strip">
+      <div class="widget">
+        <div class="widget-label">Total tracked</div>
+        <div class="widget-value" id="totalTime">0s</div>
+      </div>
+      <div class="widget">
+        <div class="widget-label">Focus</div>
+        <div class="widget-value" id="focusStatus" style="color: var(--text); font-size: 12px;">--</div>
+      </div>
+    </div>
+
+    <div id="sites"></div>
+
+    <div class="section-title">Status</div>
+    <div class="panel" id="statusBox">
+      <div class="row">
+        <span class="label">Idle</span>
+        <span class="value" id="idleStatus">--</span>
+      </div>
+      <div class="row">
+        <span class="label">Tracking</span>
+        <span class="value" id="trackingStatus">--</span>
+      </div>
+    </div>
+
+    <div class="section-title">Device</div>
+    <div class="panel">
+      <div class="row device-row">
+        <label for="deviceId">Device ID (dashboard login)</label>
+        <input id="deviceId" type="text" readonly placeholder="Saving…" />
+        <p class="hint">Each Chrome profile gets its own ID. Paste this on the server login page to see <strong>only</strong> your synced stats.</p>
+        <div class="actions device-actions">
+          <button type="button" class="btn" id="copyDeviceId">Copy ID</button>
+          <a id="dashboardLoginLink" href="#" target="_blank" rel="noopener">Dashboard login</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Sync</div>
+    <div class="panel">
+      <div class="row">
+        <label for="serverUrl">Server URL</label>
+        <input id="serverUrl" placeholder="Leave blank for default Railway URL" />
+        <p class="hint">Sites and time above are always from <strong>this browser</strong> (saved locally). Sync uploads them to the server when it is reachable.</p>
+      </div>
+      <div class="actions">
+        <button class="btn" id="saveSettings">Save</button>
+      </div>
+    </div>
+
+    <div class="panel" id="syncBox" style="margin-top: 10px;">
+      <div class="row">
+        <span class="label">Last sync</span>
+        <span class="value" id="lastSyncAt">--</span>
+      </div>
+      <div class="row">
+        <span class="label">Sync URL</span>
+        <span class="value" id="lastSyncUrl">--</span>
+      </div>
+      <div class="row">
+        <span class="label">Last error</span>
+        <span class="value" id="lastSyncError">--</span>
       </div>
     </div>
   </div>
-  <div class="settings">
-    <div class="row">
-      <label for="serverUrl">Server URL (for sync)</label>
-      <input id="serverUrl" placeholder="Leave blank for default Railway URL" />
-      <div class="hint">Sites and time above are always from <strong>this browser</strong> (saved locally). Sync uploads them to the server when it is reachable.</div>
-    </div>
-    <div class="actions">
-      <button class="btn" id="saveSettings">Save</button>
-    </div>
-  </div>
-  <div class="status" id="syncBox">
-    <div><span class="label">Last sync</span>: <span class="value" id="lastSyncAt">--</span></div>
-    <div><span class="label">Sync URL</span>: <span class="value" id="lastSyncUrl">--</span></div>
-    <div><span class="label">Last error</span>: <span class="value" id="lastSyncError">--</span></div>
-  </div>
+  <script>
+    (function () {
+      var btn = document.getElementById("themeToggle");
+      if (!btn) return;
+      function isDark() { return document.documentElement.getAttribute("data-theme") === "dark"; }
+      function sync() {
+        btn.textContent = isDark() ? "Light" : "Dark";
+        btn.setAttribute("aria-label", isDark() ? "Switch to light mode" : "Switch to dark mode");
+      }
+      sync();
+      btn.addEventListener("click", function () {
+        var next = isDark() ? "light" : "dark";
+        document.documentElement.setAttribute("data-theme", next);
+        localStorage.setItem("aa-theme", next);
+        sync();
+      });
+    })();
+  </script>
   <script src="popup.js"></script>
 </body>
 </html>
