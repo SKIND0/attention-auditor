@@ -36,7 +36,7 @@ Treat the Device ID like a password — anyone with it can view that profile's b
 - Custom domain aliases (e.g., `touro.instructure.com` → `touro.edu`)
 - Handles international TLDs (`.co.uk`, `.com.au`, etc.)
 - Filters Chrome internal pages
-- **Attention-based tracking (v2):** counts time only when Chrome is the focused app, the active tab is a normal website, and you are present (OS active). Pauses when you lock the screen, switch to another app, or go idle (~60s with no input).
+- **Attention-based tracking:** counts time only when Chrome is the focused app, the active tab is a normal website, and you are present (OS active). Pauses when you lock the screen, switch to another app, or go idle (~60s with no input).
 - **Movie/listen exception:** if a tab in the focused Chrome window is playing audio, idle does not pause tracking (hands off during a video is still counted).
 - Heartbeat commits every minute plus instant saves on tab/focus changes; stale sessions are not credited after sleep/overnight gaps.
 - Persists tracking state (`schemaVersion: 2`) to survive service worker suspension (MV3)
