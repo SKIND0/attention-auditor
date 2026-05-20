@@ -121,37 +121,10 @@ attention-auditor/
 
 ### Database Setup
 
-```sql
-CREATE DATABASE attention_auditor;
-USE attention_auditor;
+Run **`attention-auditor-backend/schema.sql`** once on your MySQL service (Railway → MySQL → Query / Connect). It creates all four tables, including `rate_limits` (otherwise the first sync after deploy runs `CREATE TABLE` on a live request).
 
-CREATE TABLE browsing_data (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    client_token VARCHAR(36) NOT NULL,
-    domain VARCHAR(255) NOT NULL,
-    seconds_spent INT NOT NULL,
-    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_client_recorded (client_token, recorded_at)
-);
-
-CREATE TABLE daily_summary (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    client_token VARCHAR(36) NOT NULL,
-    domain VARCHAR(255) NOT NULL,
-    total_seconds INT NOT NULL,
-    visit_date DATE NOT NULL,
-    UNIQUE KEY uq_client_domain_day (client_token, domain, visit_date),
-    INDEX idx_client_visit (client_token, visit_date)
-);
-
-CREATE TABLE site_categories (
-    client_token VARCHAR(36) NOT NULL,
-    domain VARCHAR(255) NOT NULL,
-    category ENUM('productive', 'distracting', 'neutral') NOT NULL,
-    source ENUM('default', 'ai', 'user') NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (client_token, domain)
-);
+```bash
+# Or paste schema.sql in Railway's MySQL console
 ```
 
 ### Backend Setup
@@ -184,15 +157,14 @@ Once logged in, the dashboard shows your browsing data with charts and AI featur
 
 ## Deploying on Railway
 
-1. Provision **MySQL** and run the schema above
-2. Set environment variables on the web service:
-   - `MYSQLHOST`, `MYSQLPORT`, `MYSQLUSER`, `MYSQLPASSWORD`, `MYSQLDATABASE` (copy from MySQL service)
-   - `OPENAI_API_KEY`
+1. Provision **MySQL** and run **`schema.sql`**
+2. Set environment variables on the **web** service (Variables → reference MySQL vars or copy `MYSQLHOST`, `MYSQLPORT`, `MYSQLUSER`, `MYSQLPASSWORD`, `MYSQLDATABASE`):
    - `FLASK_SECRET_KEY` (long random string for session cookies)
-   - `ATTENTION_AUDITOR_API_KEY` (required in production — protects `/api/track` from anonymous writes)
-3. Optional: `SESSION_COOKIE_SECURE=1`, `CORS_ORIGINS` (your Railway URL + localhost)
-4. Deploy from GitHub; set root directory to `attention-auditor-backend`
-5. Install extension → copy Device ID → paste at `/login` on your Railway URL
+   - `OPENAI_API_KEY` (optional; AI features disabled without it)
+3. Optional: `SESSION_COOKIE_SECURE=1`, `CORS_ORIGINS` (your Railway URL + localhost), `RATE_LIMIT_STORAGE=memory` (fewer MySQL round-trips on every extension sync)
+4. Deploy from GitHub; root directory **`attention-auditor-backend`**
+5. If deploy hangs: set Railway health check path to **`/health`** (returns immediately, no DB)
+6. Install extension → copy Device ID → paste at `/login` on your Railway URL
 
 ---
 

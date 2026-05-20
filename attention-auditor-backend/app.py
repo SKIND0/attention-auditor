@@ -503,6 +503,12 @@ def categorize_domain(client_token, domain):
     return category
 
 
+@app.route("/health")
+def health():
+    """Railway/deploy probe — no database (workers must boot even if MySQL is slow)."""
+    return jsonify({"status": "ok"}), 200
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     err = None
